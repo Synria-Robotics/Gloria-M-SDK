@@ -6,7 +6,7 @@ try:
 except ImportError:
     np = None
 
-gloria_max = 2.9
+gloria_max = -2.9
 
 class MotorComm:
     def __init__(self):
@@ -24,10 +24,6 @@ class MotorComm:
         超出范围自动夹紧
         """
         pos = Motor.getPosition()
-        if pos <= 0:
-            return 0.0
-        if pos >= gloria_max:
-            return 100.0
         return (pos / gloria_max) * 100.0
 
     def getVelRad(self, Motor):

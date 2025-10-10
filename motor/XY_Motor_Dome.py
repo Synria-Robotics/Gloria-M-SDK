@@ -57,12 +57,12 @@ def main(demoType=True):
 
 if __name__ == "__main__":
     try:
-        Motor1=Motor(DM_Motor_Type.DM4310,0x02,0x202)
+        Motor1=Motor(DM_Motor_Type.DM4310,0x01,0x201)
         serial_device = serial.Serial('COM3', 921600, timeout=0.5)
         MotorControl1=MotorControl(serial_device)
         MotorControl1.addMotor(Motor1)
 
-        main(False)
+        main(True)
     except KeyboardInterrupt:
         serial_device.close()
         print("exit")
