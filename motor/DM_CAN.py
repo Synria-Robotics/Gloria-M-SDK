@@ -3,7 +3,7 @@ import numpy as np
 from enum import IntEnum
 from struct import unpack
 from struct import pack
-
+import math as cm
 
 class Motor:
     def __init__(self, MotorType, SlaveID, MasterID):
@@ -18,6 +18,8 @@ class Motor:
         self.state_q = float(0)
         self.state_dq = float(0)
         self.state_tau = float(0)
+        self.T_Mos = np.uint8(0)
+        self.T_Roto = np.uint8(0)
         self.SlaveID = SlaveID
         self.MasterID = MasterID
         self.MotorType = MotorType
@@ -68,7 +70,7 @@ class MotorControl:
         [0x55, 0xAA, 0x1e, 0x03, 0x01, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0, 0, 0, 0, 0x00, 0x08, 0x00,
          0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0x00], np.uint8)
     #                4310           4310_48        4340           4340_48
-    Limit_Param = [[12.5, 30, 10], [12.5, 50, 10], [12.5, 8, 28], [12.5, 10, 28],
+    Limit_Param = [[3.14, 20, 12], [12.5, 50, 10], [12.5, 8, 28], [12.5, 10, 28],
                    # 6006           8006           8009            10010L         10010
                    [12.5, 45, 20], [12.5, 45, 40], [12.5, 45, 54], [12.5, 25, 200], [12.5, 20, 200],
                    # H3510            DMG6215      DMH6220
@@ -261,6 +263,7 @@ class MotorControl:
             if CANID != 0x00:
                 if CANID in self.motors_map:
                     q_uint = np.uint16((np.uint16(data[1]) << 8) | data[2])
+                    # recv_q = int.from_bytes(data[1:3], byteorder='big', signed=True)
                     dq_uint = np.uint16((np.uint16(data[3]) << 4) | (data[4] >> 4))
                     tau_uint = np.uint16(((data[4] & 0xf) << 8) | data[5])
                     MotorType_recv = self.motors_map[CANID].MotorType
@@ -268,9 +271,30 @@ class MotorControl:
                     DQ_MAX = self.Limit_Param[MotorType_recv][1]
                     TAU_MAX = self.Limit_Param[MotorType_recv][2]
                     recv_q = uint_to_float(q_uint, -Q_MAX, Q_MAX, 16)
+                    # recv_qf = int_to_float(recv_q, -Q_MAX, Q_MAX, 16)
                     recv_dq = uint_to_float(dq_uint, -DQ_MAX, DQ_MAX, 12)
                     recv_tau = uint_to_float(tau_uint, -TAU_MAX, TAU_MAX, 12)
                     self.motors_map[CANID].recv_data(recv_q, recv_dq, recv_tau)
+                    # self.motors_map[CANID].recv_data(recv_qf, recv_dq, recv_tau)
+                    self.T_Mos = data[6]
+                    self.T_Roto = data[7]
+                    if data[0]>>4 in [8, 9, 10, 11, 12, 13, 14]:
+                        ERROR_FLAG = "状态异常："
+                        if data[0]>>4 == 8:
+                            ERROR_FLAG = ERROR_FLAG + "超压"
+                        if data[0]>>4 == 9:
+                            ERROR_FLAG = ERROR_FLAG + "欠压"
+                        if data[0]>>4 == 10:
+                            ERROR_FLAG = ERROR_FLAG + "过流"
+                        if data[0]>>4 == 11:
+                            ERROR_FLAG = ERROR_FLAG + "MOS 过温"
+                        if data[0]>>4 == 12:
+                            ERROR_FLAG = ERROR_FLAG + "电机线圈过温"
+                        if data[0]>>4 == 13:
+                            ERROR_FLAG = ERROR_FLAG + "通讯丢失"
+                        if data[0]>>4 == 14:
+                            ERROR_FLAG = ERROR_FLAG + "过载"
+                        print(ERROR_FLAG)
             else:
                 MasterID=data[0] & 0x0f
                 if MasterID in self.motors_map:
@@ -337,6 +361,8 @@ class MotorControl:
         self.send_data_frame[13] = motor_id & 0xff
         self.send_data_frame[14] = (motor_id >> 8)& 0xff  #id high 8 bits
         self.send_data_frame[21:29] = data
+        # hex_data = ''.join([f"{byte:02X}, " for byte in self.send_data_frame])
+        # print(f"Send data to motor {motor_id}: {hex_data}")
         self.serial_.write(bytes(self.send_data_frame.T))
 
     def __read_RID_param(self, Motor, RID):
@@ -479,17 +505,34 @@ class MotorControl:
 
 
 def LIMIT_MIN_MAX(x, min, max):
-    if x <= min:
-        x = min
-    elif x > max:
-        x = max
+    # 旧实现无返回值 -> 无法截断, 改为返回截断后的值
+    if x < min:
+        return min
+    if x > max:
+        return max
+    return x
 
 
 def float_to_uint(x: float, x_min: float, x_max: float, bits):
-    LIMIT_MIN_MAX(x, x_min, x_max)
+    """
+    将浮点数映射到无符号整数:
+    x < x_min -> 截断为 x_min
+    x > x_max -> 截断为 x_max
+    bits 指定位宽 (如 16)
+    """
+    if x_max <= x_min:
+        raise ValueError("x_max 必须大于 x_min")
+    max_raw = (1 << bits) - 1
+    x_clamped = LIMIT_MIN_MAX(x, x_min, x_max)
     span = x_max - x_min
-    data_norm = (x - x_min) / span
-    return np.uint16(data_norm * ((1 << bits) - 1))
+    data_norm = (x_clamped - x_min) / span  # in [0,1]
+    val = int(round(data_norm * max_raw))
+    # 双重保险
+    if val < 0:
+        val = 0
+    elif val > max_raw:
+        val = max_raw
+    return np.uint16(val)
 
 
 def uint_to_float(x: np.uint16, min: float, max: float, bits):
@@ -498,6 +541,33 @@ def uint_to_float(x: np.uint16, min: float, max: float, bits):
     temp = data_norm * span + min
     return np.float32(temp)
 
+def int_to_float(x: np.int16, min: float, max: float, bits: int) -> np.float32:
+    """
+    将有符号整数转换为指定范围的浮点数
+    
+    参数:
+        x: 待转换的有符号整数（如np.int16）
+        min: 目标浮点数范围的最小值
+        max: 目标浮点数范围的最大值
+        bits: 整数的位数（如16表示16位有符号整数）
+    
+    返回:
+        映射后的32位浮点数
+    """
+    # 计算有符号整数的取值范围
+    min_int = - (1 << (bits - 1))  # 最小值（如16位：-32768）
+    max_int = (1 << (bits - 1)) - 1  # 最大值（如16位：32767）
+    
+    # 计算整数范围的跨度
+    int_span = max_int - min_int
+    
+    # 将整数归一化到 [0, 1] 区间
+    data_norm = (x - min_int) / int_span
+    
+    # 将归一化值映射到 [min, max] 区间
+    temp = data_norm * (max - min) + min
+    
+    return np.float32(temp)
 
 def float_to_uint8s(value):
     # Pack the float into 4 bytes
