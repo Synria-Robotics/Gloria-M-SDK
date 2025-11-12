@@ -1,139 +1,121 @@
 # Gloria-M-SDK
 
-Gloria-M 夹爪 Python SDK —— 串口双线程(读/写) + 自定义轻量协议。
+Gloria-M-SDK 是用于控制达妙（DM）系列电机的开发工具包，支持电机参数配置、控制模式切换、状态读取等功能，适用于基于CAN通信的电机控制系统开发。
 
-## 特性
+## 依赖环境
+- Python 3.x
+- numpy
+- pyserial
 
-- 串口读写分离线程，线程安全发送队列
-- 自定义帧 (Start | Type | Length | Payload | CRC16) 易调试
-- 回调式事件：状态 / ACK / 错误
-- 简单的命令与状态数据模型
-- 可注入 mock 串口，方便无硬件测试
-
-## 安装
-
+## 安装方法
+1. 克隆仓库到本地
 ```bash
-pip install gloria-msdk
-```
-
-## 快速示例
-
-```python
-from gloria_msdk import SerialManager, SerialConfig, Command
-
-cfg = SerialConfig(port="COM3")
-with SerialManager(cfg) as mgr:
-	mgr.on_status.register(lambda st: print("status", st))
-	mgr.send_command(Command(code=0x01))
-```
-
-更多内容见 `docs/` 与 `examples/`。
-
-## 使用步骤 (Step by Step)
-
-### 1. 克隆项目
-```powershell
-git clone https://github.com/Synria-Robotics/Gloria-M-SDK.git
+git clone https://github.com/your-username/Gloria-M-SDK.git
 cd Gloria-M-SDK
 ```
-
-### 2. 创建并激活虚拟环境 (可选但推荐)
-使用 venv：
-```powershell
-python -m venv .venv
-./.venv/Scripts/Activate.ps1
-```
-或使用 conda：
-```powershell
-conda create -n gloria python=3.11 -y
-conda activate gloria
-```
-
-### 3. 安装依赖 / 开发模式
-```powershell
-pip install -r requirements.txt
-pip install -e .
-```
-快速验证：
-```powershell
-python -c "import gloria_msdk; print('SDK OK')"
-```
-
-### 4. 运行基础示例 (三种端口指定方式)
-交互模式 (自动列出串口)：
-```powershell
-python examples/basic_usage.py
-```
-命令行直接指定端口：
-```powershell
-python examples/basic_usage.py COM3
-```
-使用环境变量：
-```powershell
-$env:GLORIA_PORT="COM3"; python examples/basic_usage.py
-```
-（若已 `pip install -e .`，无需关心示例内的 `sys.path` 逻辑；那部分仅为直接从源码目录执行提供兼容。）
-
-### 5. 运行进阶示例 (Mock ACK)
-无需真实硬件：
-```powershell
-python examples/advanced_usage.py
-```
-
-### 6. 在你的代码中集成
-```python
-from gloria_msdk import SerialManager, SerialConfig, Command
-
-cfg = SerialConfig(port="COM3")
-with SerialManager(cfg) as mgr:
-	mgr.on_status.register(lambda st: print("status", st))
-	mgr.send_command(Command(code=0x01))
-```
-
-### 7. 运行测试
-```powershell
-pip install pytest
-pytest -q
-```
-
-### 8. 打包 (可选发布)
-```powershell
-python setup.py sdist bdist_wheel
-```
-产物位于 `dist/`。
-
-### 9. 快速列出本机串口
-```powershell
-python - <<'PY'
-from serial.tools import list_ports
-print([p.device for p in list_ports.comports()])
-PY
-```
-
-### 10. 常见问题 (FAQ)
-| 问题 | 说明 / 处理 |
-|------|--------------|
-| 未列出串口 | 检查设备驱动、数据线；手动输入端口名；设备管理器确认端口号 |
-| 读不到状态 | 确认波特率一致、设备已开始上报；可用串口调试助手对比 |
-| CRC mismatch | 说明帧损坏或协议不匹配；检查线缆/波特率/端口是否被其它程序占用 |
-| Windows 权限 | 以管理员运行或释放被占用串口 (关闭其它串口工具) |
-| 等待 ACK 超时 | 设备未返回 ACK；确认设备固件是否支持命令或延长超时 |
-
-### 11. 日志/调试建议
-当前示例未启用 logging，可在 `CommandSender._send` 与 `DataReader._handle_frame` 中加入 `print` 或集成 `logging` 模块进行诊断。
-
-### 12. 自定义 / 扩展
-- 新增命令：在上层直接构造不同 `Command(code=...)`。
-- 新增状态字段：修改 `DeviceStatus` 的打包/解包格式，并同步固件。
-- 序列号 ACK 匹配：可在协议 payload 中加入 seq 字段并在 `send_command` 按 seq 对应。
-
-## 测试
-
+2. 安装依赖包
 ```bash
-pytest -q
+pip install -r requirements.txt
 ```
 
-## 许可
+## 快速开始
+以下示例展示如何初始化电机、使能并进行基本控制：
+```python
+import serial
+from DM_CAN import Motor, MotorControl, DM_Motor_Type
+from XuanYa_Comm import MotorComm
+import time
+import numpy as np  # 补充缺失的numpy导入
 
-MIT (若需变更可更新此节)。
+# 初始化串口（根据实际端口修改）
+serial_device = serial.Serial('COM3', 115200, timeout=0.1)
 
+# 创建电机对象（电机类型、从机ID、主机ID）
+motor = Motor(
+    MotorType=DM_Motor_Type.DM4310,
+    SlaveID=1,
+    MasterID=100
+)
+
+# 创建电机控制对象
+motor_control = MotorControl(serial_device)
+motor_control.addMotor(motor)
+
+# 初始化通信对象
+mc = MotorComm()
+
+# 失能后重新使能电机
+motor_control.disable(motor)
+time.sleep(1)
+motor_control.enable(motor)
+
+# MIT模式控制（位置环+速度+力矩环）
+try:
+    while True:
+        # 设定期望位置、速度、力矩（示例：正弦轨迹）
+        t = time.time()
+        q = 1.5 * (1 + np.sin(2 * np.pi * 0.5 * t))  # 位置（弧度）
+        dq = 1.5 * np.pi * np.cos(2 * np.pi * 0.5 * t)  # 速度（弧度/秒）
+        tau = 0.0  # 力矩（Nm）
+        
+        # 发送控制命令（kp=20, kd=1）
+        motor_control.controlMIT(motor, 20.0, 1.0, q, dq, tau)
+        
+        # 打印电机状态
+        print(f"位置: {mc.getAngle(motor):.2f}°  速度: {mc.getVel(motor):.2f}°/s  力矩: {mc.getTorque(motor):.2f}Nm")
+        time.sleep(0.001)
+except KeyboardInterrupt:
+    # 退出时失能电机
+    motor_control.disable(motor)
+    serial_device.close()
+```
+
+## 基本用法
+1. 电机参数配置
+```python
+# 修改电机参数（RID为参数ID，data为参数值）
+success = motor_control.change_motor_param(motor, RID=0x01, data=100)
+if success:
+    print("参数修改成功")
+
+# 读取电机参数
+param_value = motor_control.read_motor_param(motor, RID=0x01)
+print(f"参数值: {param_value}")
+
+# 保存参数到Flash
+motor_control.save_motor_param(motor)
+```
+
+2. 控制模式切换
+```python
+from DM_CAN import Control_Type
+
+# 切换到MIT控制模式
+motor_control.switchControlMode(motor, Control_Type.MIT)
+
+# 切换到位置-速度控制模式
+motor_control.switchControlMode(motor, Control_Type.POS_VEL)
+```
+
+3. 状态读取
+```python
+# 获取位置（弧度）
+pos_rad = mc.getPosRad(motor)
+
+# 获取角度（度）
+angle = mc.getAngle(motor)
+
+# 获取速度（度/秒）
+vel = mc.getVel(motor)
+
+# 获取温度
+t_mos = mc.getTMos(motor)  # MOS管温度
+t_roto = mc.getTRoto(motor)  # 转子温度
+```
+
+## 注意事项
+- 电机使能前建议等待 1-2 秒，确保硬件初始化完成
+- 旧版本固件电机使能需使用enable_old方法并指定控制模式
+- 通信前需确保 CAN 端口配置正确（波特率、端口号）
+- 修改关键参数（如限位）后建议重启电机生效
+- 长时间运行需定期调用refresh_motor_status更新电机状态
