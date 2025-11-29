@@ -1,6 +1,6 @@
 import time
 import serial
-from DM_CAN import *
+from CAN import *
 from XuanYa_Comm import MotorComm, gloria_max
 
 """

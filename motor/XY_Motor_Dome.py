@@ -1,5 +1,5 @@
 import math as cm
-from DM_CAN import *
+from CAN import *
 import serial
 import time
 from XuanYa_Comm import *
