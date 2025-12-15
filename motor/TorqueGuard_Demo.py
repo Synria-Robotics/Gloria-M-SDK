@@ -124,7 +124,7 @@ def main():
     state = "NORMAL"  # 可取 NORMAL / PROTECT / RECOVERY
 
     # 初始化电机
-    Motor1 = Motor(DM_Motor_Type.DM4310, 0x01, 0x201)
+    Motor1 = Motor(DM_Motor_Type.DM4310, 0x01, 0x101)
     serial_device = serial.Serial('COM3', 921600, timeout=0.5)
     MotorControl1 = MotorControl(serial_device)
     MotorControl1.addMotor(Motor1)
