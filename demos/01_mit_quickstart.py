@@ -10,7 +10,7 @@ MIT 往复开合示例
 并且你的夹爪定义为：
 - 位置单位为弧度(rad)
 - 0.0 表示夹爪“完全张开”
-- 越负越“闭合”，安全范围默认为 [-2.9, 0.0]
+- 越负越“闭合”，安全范围默认为 [MIT_SAFE_Q_MIN, 0.0]
 
 本示例会在安全范围内做一个“往返开合”的位置轨迹，并打印：
 - 期望位置 q_des
@@ -39,6 +39,7 @@ from gloria_m_sdk import (
     CanController,
     ControlMode,
     Limits,
+    MIT_SAFE_Q_MIN,
     PositionRange,
     SerialCanAdapter,
     apply_limits_and_save,
@@ -65,7 +66,7 @@ def main() -> int:
     args = ap.parse_args()
 
     # 配置夹爪安全范围和缩放上限
-    safe_q = PositionRange(min=-2.9, max=0.0)
+    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=0.0)
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
     # 定义一个电机对象

@@ -27,6 +27,7 @@ from gloria_m_sdk import (
     CanController,
     ControlMode,
     Limits,
+    MIT_SAFE_Q_MIN,
     PositionRange,
     SerialCanAdapter,
     apply_limits_and_save,
@@ -61,7 +62,7 @@ def main() -> int:
     args = ap.parse_args()
 
     # 设定电机位置范围和缩放上限
-    safe_q = PositionRange(min=-2.9, max=0.0)
+    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=0.0)
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
     # 创建电机对象

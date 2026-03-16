@@ -12,7 +12,7 @@ MIT 模式力控示例
 
 注意：
 - 力矩上限由 Limits.tmax 决定（默认是 12），超过会被打包时限幅
-- 夹爪安全位置范围固定为 [-2.9, 0.0]，超出会被 clamp
+- 夹爪安全位置范围固定为 [MIT_SAFE_Q_MIN, 0.0]，超出会被 clamp
 """
 
 import argparse
@@ -31,6 +31,7 @@ from gloria_m_sdk import (
     CanController,
     ControlMode,
     Limits,
+    MIT_SAFE_Q_MIN,
     PositionRange,
     SerialCanAdapter,
     apply_limits_and_save,
@@ -59,7 +60,7 @@ def main() -> int:
     args = ap.parse_args()
 
     # 固定你的夹爪安全范围：0.0 张开，负方向闭合
-    safe_q = PositionRange(min=-2.9, max=0.0)
+    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=0.0)
     # 固定你的 MIT 缩放上限（PMAX/VMAX/TMAX）
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
