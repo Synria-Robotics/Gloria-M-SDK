@@ -9,6 +9,7 @@ from .serial_can_adapter import SerialCanAdapter
 from .controller import CanController
 from .param_config import apply_limits_and_save
 from .constants import MIT_SAFE_Q_MIN
+from .registers import Variable
 
 __all__ = [
     "Actuator",
@@ -20,5 +21,6 @@ __all__ = [
     "MIT_SAFE_Q_MIN",
     "PositionRange",
     "SerialCanAdapter",
+    "Variable",
 ]
 

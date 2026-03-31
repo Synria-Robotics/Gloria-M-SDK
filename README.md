@@ -29,27 +29,40 @@ pip install -e .
 - 电机命令 ID：`0x01`
 - 反馈 ID：`0x101`
 - MIT 安全位置范围：\([MIT_SAFE_Q_MIN, 0.0]\)，其中 **0.0 为完全张开**
+- `MIT_SAFE_Q_MIN` 定义在 `gloria_m_sdk` 中（`src/gloria_m_sdk/constants.py`），如需调整限幅下限，修改这一处即可。
 - MIT 缩放上限（PMAX/VMAX/TMAX）：`[3.14, 10, 12]`
 
 ### 1) MIT 往返开合示例
 
 ```bash
-python demos/mit_quickstart.py --port COM8
+python demos/01_mit_quickstart.py --port COM8
 ```
 
 ### 2) MIT 力控示例
 
 ```bash
-python demos/mit_torque_control.py --port COM8
+python demos/03_mit_torque_control.py --port COM8
 ```
 
 ### 3) PV 位置精度示例
 
 ```bash
-python demos/pv_position_accuracy.py --port COM8
+python demos/04_pv_position_accuracy.py --port COM8
+```
+
+### 4) 修改电机 CAN ID / MST_ID（并保存）
+
+> 修改 `ESC_ID(CAN ID)` / `MST_ID` 后会自动发送 `SAVE(0xAA)` 持久化。
+
+```bash
+# 读取当前 MST_ID / ESC_ID
+python demos/05_change_can_mst_id.py --port COM8 --id 0x01
+
+# 修改 CAN ID 与 MST_ID（写入后自动保存）
+python demos/05_change_can_mst_id.py --port COM12 --id 0x02 --new-can-id 0x01 --new-mst-id 0x101 
 ```
 
 ## 备注
 
-- **发控制帧才会返回最新位置/速度/力矩**。
+- **发控制帧才会返回最新位置/速度/力矩/温度**。
 
