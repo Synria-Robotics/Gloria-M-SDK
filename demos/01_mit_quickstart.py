@@ -55,9 +55,9 @@ def main() -> int:
     ap.add_argument("--port", default="COM12", help="串口号。Windows 例如 COM8；Linux 例如 /dev/ttyUSB0")
     ap.add_argument("--baud", type=int, default=921600, help="波特率，默认 921600")
     # 这里的 id 是电机的 CAN ID
-    ap.add_argument("--id", type=_parse_int, default="0x01", help="电机ID，默认 0x01")
+    ap.add_argument("--id", type=_parse_int, default="0x07", help="电机ID，默认 0x01")
     # 反馈帧的 CAN ID
-    ap.add_argument("--fb-id", type=_parse_int, default="0x101", help="反馈ID，默认 0x101")
+    ap.add_argument("--fb-id", type=_parse_int, default="0x207", help="反馈ID，默认 0x101")
     # run-seconds = 0 表示一直运行，按 Ctrl+C 退出
     ap.add_argument("--run-seconds", type=float, default=0.0, help="运行时长（秒）。0 表示无限循环，Ctrl+C 退出")
     # 一个开合往返周期（秒）
