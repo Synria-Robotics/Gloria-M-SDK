@@ -10,7 +10,7 @@ MIT 往复开合示例
 并且你的夹爪定义为：
 - 位置单位为弧度(rad)
 - 0.0 表示夹爪“完全张开”
-- 越负越“闭合”，安全范围默认为 [MIT_SAFE_Q_MIN, 0.0]
+- 沿正方向增大趋向“闭合”，安全范围默认为 [MIT_SAFE_Q_MIN, MIT_SAFE_Q_MAX]
 
 本示例会在安全范围内做一个“往返开合”的位置轨迹，并打印：
 - 期望位置 q_des
@@ -39,6 +39,7 @@ from gloria_m_sdk import (
     CanController,
     ControlMode,
     Limits,
+    MIT_SAFE_Q_MAX,
     MIT_SAFE_Q_MIN,
     PositionRange,
     SerialCanAdapter,
@@ -51,13 +52,13 @@ def _parse_int(s: str) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="MIT 往复运动示例（夹爪：0开 负方向闭合）")
+    ap = argparse.ArgumentParser(description="MIT 往复运动示例（夹爪：0 开，正方向趋向闭合）")
     ap.add_argument("--port", default="COM12", help="串口号。Windows 例如 COM8；Linux 例如 /dev/ttyUSB0")
     ap.add_argument("--baud", type=int, default=921600, help="波特率，默认 921600")
     # 这里的 id 是电机的 CAN ID
-    ap.add_argument("--id", type=_parse_int, default="0x07", help="电机ID，默认 0x01")
+    ap.add_argument("--id", type=_parse_int, default="0x01", help="电机ID，默认 0x01")
     # 反馈帧的 CAN ID
-    ap.add_argument("--fb-id", type=_parse_int, default="0x207", help="反馈ID，默认 0x101")
+    ap.add_argument("--fb-id", type=_parse_int, default="0x101", help="反馈ID，默认 0x101")
     # run-seconds = 0 表示一直运行，按 Ctrl+C 退出
     ap.add_argument("--run-seconds", type=float, default=0.0, help="运行时长（秒）。0 表示无限循环，Ctrl+C 退出")
     # 一个开合往返周期（秒）
@@ -66,7 +67,7 @@ def main() -> int:
     args = ap.parse_args()
 
     # 配置夹爪安全范围和缩放上限
-    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=0.0)
+    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=MIT_SAFE_Q_MAX)
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
     # 定义一个电机对象
@@ -112,10 +113,10 @@ def main() -> int:
                 if args.run_seconds and (time.time() - start_wall) > float(args.run_seconds):
                     break
 
-                # 生成一个基于safe_q范围的“往返”位置轨迹：默认0.0张开
+                # 生成一个基于 safe_q 的“往返”位置轨迹：u=1 时靠近张开(min)，u=0 时靠近闭合(max)
                 period = max(0.1, float(args.sweep_period))
                 u = (math.cos(2.0 * math.pi * (t / period)) * 0.5 + 0.5)  # u in [0,1]
-                q_des = (1.0 - u) * (safe_q.min - safe_q.max) + safe_q.max
+                q_des = (1.0 - u) * safe_q.max + u * safe_q.min
 
                 # max_step = slew_rate * dt
                 if dt > 0:

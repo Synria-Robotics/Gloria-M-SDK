@@ -25,6 +25,7 @@ from gloria_m_sdk import (
     CanController,
     ControlMode,
     Limits,
+    MIT_SAFE_Q_MAX,
     MIT_SAFE_Q_MIN,
     PositionRange,
     SerialCanAdapter,
@@ -56,7 +57,7 @@ def main() -> int:
     ap.add_argument("--fb-id", type=_parse_int, default="0x101", help="反馈ID，默认 0x101")
     args = ap.parse_args()
 
-    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=0.0)
+    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=MIT_SAFE_Q_MAX)
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
     act = Actuator(

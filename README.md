@@ -28,8 +28,8 @@ pip install -e .
 
 - 电机命令 ID：`0x01`
 - 反馈 ID：`0x101`
-- MIT 安全位置范围：\([MIT_SAFE_Q_MIN, 0.0]\)，其中 **0.0 为完全张开**
-- `MIT_SAFE_Q_MIN` 定义在 `gloria_m_sdk` 中（`src/gloria_m_sdk/constants.py`），如需调整限幅下限，修改这一处即可。
+- MIT 安全位置范围：\([MIT_SAFE_Q_MIN, MIT_SAFE_Q_MAX]\)，其中 **0.0 为完全张开**，**正方向增大趋向闭合**
+- `MIT_SAFE_Q_MIN` / `MIT_SAFE_Q_MAX` 定义在 `gloria_m_sdk` 中（`src/gloria_m_sdk/constants.py`），如需调整安全区间，修改这两处即可。
 - MIT 缩放上限（PMAX/VMAX/TMAX）：`[3.14, 10, 12]`
 
 ### 1) MIT 往返开合示例

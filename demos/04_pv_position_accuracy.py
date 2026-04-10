@@ -27,6 +27,7 @@ from gloria_m_sdk import (
     CanController,
     ControlMode,
     Limits,
+    MIT_SAFE_Q_MAX,
     MIT_SAFE_Q_MIN,
     PositionRange,
     SerialCanAdapter,
@@ -53,8 +54,8 @@ def main() -> int:
     ap.add_argument(
         "--targets",
         type=_parse_floats_csv,
-        default="0.0,-1.0,-2.5,0.0",
-        help="目标位置列表(弧度,逗号分隔)，默认 0.0,-1.0,-2.5,0.0",
+        default="0.0,1.0,2.5,0.0",
+        help="目标位置列表(弧度,逗号分隔)，默认 0.0,1.0,2.5,0.0",
     )
     ap.add_argument("--vel", type=float, default=4.0, help="追踪速度(弧度/秒)，默认 4.0（越大越快，但可能超调/抖动）")
     ap.add_argument("--hold-seconds", type=float, default=2.0, help="每个目标保持/追踪时长（秒），太短会导致误差评估不准")
@@ -62,7 +63,7 @@ def main() -> int:
     args = ap.parse_args()
 
     # 设定电机位置范围和缩放上限
-    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=0.0)
+    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=MIT_SAFE_Q_MAX)
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
     # 创建电机对象

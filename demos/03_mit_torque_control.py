@@ -12,7 +12,7 @@ MIT 模式力控示例
 
 注意：
 - 力矩上限由 Limits.tmax 决定（默认是 12），超过会被打包时限幅
-- 夹爪安全位置范围固定为 [MIT_SAFE_Q_MIN, 0.0]，超出会被 clamp
+- 夹爪安全位置范围固定为 [MIT_SAFE_Q_MIN, MIT_SAFE_Q_MAX]，超出会被 clamp
 """
 
 import argparse
@@ -31,6 +31,7 @@ from gloria_m_sdk import (
     CanController,
     ControlMode,
     Limits,
+    MIT_SAFE_Q_MAX,
     MIT_SAFE_Q_MIN,
     PositionRange,
     SerialCanAdapter,
@@ -48,7 +49,7 @@ def main() -> int:
     ap.add_argument("--baud", type=int, default=921600, help="波特率，默认 921600")
     ap.add_argument("--id", type=_parse_int, default="0x01", help="电机ID（MIT命令ID），默认 0x01")
     ap.add_argument("--fb-id", type=_parse_int, default="0x101", help="反馈ID，默认 0x101")
-    ap.add_argument("--hold-q", type=float, default=-1.2, help="保持位置(弧度)，默认 -1.2（会自动 clamp 到安全范围）")
+    ap.add_argument("--hold-q", type=float, default=1.2, help="保持位置(弧度)，默认 1.2（会自动 clamp 到安全范围）")
     ap.add_argument("--tau-amp", type=float, default=2.0, help="力矩正弦幅值，默认 2.0（单位与反馈 tau 一致）")
     ap.add_argument("--tau-freq", type=float, default=0.5, help="力矩正弦频率(Hz)，默认 0.5")
     # run-seconds = 0 表示一直运行，按 Ctrl+C 退出
@@ -59,8 +60,8 @@ def main() -> int:
     ap.add_argument("--tau-ramp-seconds", type=float, default=1.0, help="力矩渐入时间（秒），默认 1.0")
     args = ap.parse_args()
 
-    # 固定你的夹爪安全范围：0.0 张开，负方向闭合
-    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=0.0)
+    # 固定你的夹爪安全范围：0.0 张开，正方向趋向闭合
+    safe_q = PositionRange(min=MIT_SAFE_Q_MIN, max=MIT_SAFE_Q_MAX)
     # 固定你的 MIT 缩放上限（PMAX/VMAX/TMAX）
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
