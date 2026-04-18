@@ -181,8 +181,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--port", default="COM12", help="串口号，例如 COM8 或 /dev/ttyUSB0")
     ap.add_argument("--baud", type=int, default=921600, help="串口波特率")
-    ap.add_argument("--id", type=_parse_int, default="0x07", help="电机命令 CAN ID")
-    ap.add_argument("--fb-id", type=_parse_int, default="0x207", help="电机反馈 CAN ID")
+    ap.add_argument("--id", type=_parse_int, default="0x01", help="电机命令 CAN ID")
+    ap.add_argument("--fb-id", type=_parse_int, default="0x101", help="电机反馈 CAN ID")
 
     ap.add_argument("--open-q", type=float, default=2.77, help="夹爪最大张开位置 [rad]")
     ap.add_argument(
@@ -198,13 +198,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--baseline-csv",
-        default="",
+        default=".\demos\output\close_baseline_binned.csv",
         help="空载扭矩基线 CSV，建议使用 07_mit_close_test.py 生成的 *_binned.csv",
     )
 
     ap.add_argument("--target-force", type=float, default=15.0, help="目标夹持力 [N]")
-    ap.add_argument("--open-tau", type=float, default=0.25, help="张开方向扭矩，必须为正 [Nm]")
-    ap.add_argument("--close-tau", type=float, default=-0.25, help="闭合方向扭矩，必须为负 [Nm]")
+    ap.add_argument("--open-tau", type=float, default=2.5, help="张开方向扭矩，必须为正 [Nm]")
+    ap.add_argument("--close-tau", type=float, default=-2.5, help="闭合方向扭矩，必须为负 [Nm]")
     ap.add_argument(
         "--contact-force",
         type=float,
@@ -220,7 +220,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--max-hold-tau",
         type=float,
-        default=20,
+        default=25,
         help="保持阶段允许的最大闭合力矩 [Nm]",
     )
 
@@ -236,7 +236,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=20.0,
         help="力控积分限幅 [N*s]",
     )
-    ap.add_argument("--hold-seconds", type=float, default=3.0, help="保持夹持时间 [s]")
+    ap.add_argument("--hold-seconds", type=float, default=5.0, help="保持夹持时间 [s]")
     ap.add_argument("--cycles", type=int, default=1, help="执行循环次数，0 表示一直循环")
 
     ap.add_argument(
