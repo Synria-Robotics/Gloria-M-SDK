@@ -2,39 +2,42 @@
 
 > Python SDK for serial-to-CAN motor control, targeting the Gloria-M series gripper actuators.
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Copyright (c) 2026 Synria Robotics Co., Ltd.  
 Website: https://synriarobotics.ai
 
 ## Features
 
 - Communicates with Gloria-M series motors through a serial-to-CAN adapter
-- Supports **MIT mode** (kp/kd/τ torque control) and **PV mode** (position + velocity)
+- Supports **MIT mode** (kp/kd/torque feedforward control) and **PV mode** (position + velocity)
 - Provides parameter read/write and enable/disable primitives
 - Built-in MIT protocol packing/unpacking and feedback state parsing
 
 ## Project Structure
 
 ```
-Gloria-M-SDK-1.0.3/
-├── src/gloria_m_sdk/       # SDK core library
-│   ├── __init__.py         # Package entry point; exports public API
-│   ├── actuator.py         # Actuator abstraction
-│   ├── controller.py       # High-level controller (command dispatch, feedback parsing)
-│   ├── protocol_mit.py     # MIT protocol packing/unpacking
-│   ├── serial_can_adapter.py  # Serial-to-CAN adapter
-│   ├── param_config.py     # Parameter write and save
-│   ├── registers.py        # Register definitions (RID enum)
-│   ├── types.py            # Data types (Limits, ControlMode, etc.)
-│   ├── constants.py        # Constant definitions
-│   └── gripper_baseline.py # Gripper torque baseline
-├── demos/                  # Example scripts
-│   ├── 01_gripper_quicktest.py  # PV mode reciprocating cycle test
-│   ├── 02_pv_control.py        # PV mode gentle close
-│   ├── 03_mit_linkage_force_control.py  # MIT linkage gripper force control
-│   └── output/                 # Baseline data CSV output
-├── pyproject.toml
-├── requirements.txt
-└── README.md
+Gloria-M-SDK/
+|-- src/gloria_m_sdk/       # SDK core library
+|   |-- __init__.py         # Package entry point; exports public API
+|   |-- actuator.py         # Actuator abstraction
+|   |-- controller.py       # High-level controller (command dispatch, feedback parsing)
+|   |-- protocol_mit.py     # MIT protocol packing/unpacking
+|   |-- serial_can_adapter.py  # Serial-to-CAN adapter
+|   |-- param_config.py     # Parameter write and save
+|   |-- registers.py        # Register definitions (RID enum)
+|   |-- types.py            # Data types (Limits, ControlMode, etc.)
+|   |-- constants.py        # Constant definitions
+|   `-- gripper_baseline.py # Gripper torque baseline
+|-- demos/                  # Example scripts
+|   |-- 01_gripper_quicktest.py  # PV mode reciprocating cycle test
+|   |-- 02_pv_control.py        # PV mode gentle close
+|   |-- 03_mit_linkage_force_control.py  # MIT linkage gripper force control
+|   `-- output/                 # Baseline data CSV output
+|-- pyproject.toml
+|-- requirements.txt
+|-- README.md
+`-- README.zh-CN.md
 ```
 
 ## Requirements
@@ -57,7 +60,7 @@ pip install -e .
 
 ## Demos
 
-### 01_gripper_quicktest.py — PV mode reciprocating cycle test
+### 01_gripper_quicktest.py - PV mode reciprocating cycle test
 
 The gripper repeatedly moves between open and close positions to quickly verify that the PV control mode is working correctly.
 
@@ -65,7 +68,7 @@ The gripper repeatedly moves between open and close positions to quickly verify 
 python demos/01_gripper_quicktest.py --port COM5 --id 0x01 --close-q 0.0 --open-q 2.5 --velocity 1.0
 ```
 
-### 02_pv_control.py — PV mode gentle close
+### 02_pv_control.py - PV mode gentle close
 
 Opens to position 2.5, then closes to position 0 at a low speed in PV mode. Suitable for gently gripping delicate objects.
 
@@ -73,12 +76,18 @@ Opens to position 2.5, then closes to position 0 at a low speed in PV mode. Suit
 python demos/02_pv_control.py --port COM5 --open-q 2.5 --close-q 0.0 --close-vel 0.3
 ```
 
-### 03_mit_linkage_force_control.py — MIT linkage gripper force control
+### 03_mit_linkage_force_control.py - MIT linkage gripper force control
 
 Approach-contact-hold-release cycle using MIT torque control with a configurable moment-arm profile for accurate fingertip force estimation.
 
 ```bash
 python demos/03_mit_linkage_force_control.py --port COM5 --open-q 2.77 --close-q 0.003 --target-force 15
+```
+
+For the 4340 high-force gripper version:
+
+```bash
+python demos/03_mit_linkage_force_control.py --port COM5 --baseline-csv ".\demos\output\close_baseline_4340.csv" --target-force 30 --contact-force 60
 ```
 
 **MIT control formula:**
@@ -95,6 +104,9 @@ $$\tau_{out} = k_p \cdot (q_{target} - q_{fb}) + k_d \cdot (dq_{target} - dq_{fb
 | `--fb-id` | 0x101 | Motor feedback CAN ID |
 | `--open-q` | 2.5 | Open position [rad] |
 | `--close-q` | 0.0 | Close position [rad] |
+| `--baseline-csv` | ".\\demos\\output\\close_baseline_4310.csv" | No-load baseline file for the gripper. Defaults to the 4310 profile; use `close_baseline_4340.csv` manually for the 4340 version |
+| `--target-force` | 15 | Target gripping force [N] |
+| `--contact-force` | 10 | Contact detection force threshold [N]; use 60 for the 4340 gripper version |
 
 ## License
 
