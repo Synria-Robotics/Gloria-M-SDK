@@ -203,7 +203,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--baseline-csv",
-        default=".\\demos\\output\\close_baseline_binned.csv",
+        default=".\\demos\\output\\close_baseline_4310.csv",
         help="no-load torque baseline CSV; recommended: *_binned.csv from 07_mit_close_test.py",
     )
 
@@ -219,7 +219,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--abort-force",
         type=float,
-        default=65.0,
+        default=500.0,
         help="force protection threshold [N]; with baseline loaded this is the incremental gripping force limit",
     )
     ap.add_argument(
