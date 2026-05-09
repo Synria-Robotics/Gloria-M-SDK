@@ -52,9 +52,25 @@ def _parse_int(value: str) -> int:
     return int(value, 0)
 
 
+def _resolve_port(port: str) -> str:
+    """Return *port* unchanged, or auto-detect a single available COM port."""
+    if port and port.lower() != "auto":
+        return port
+    from serial.tools import list_ports
+
+    found = list(list_ports.comports())
+    if not found:
+        raise SystemExit("[port] No serial ports found. Plug in the serial-to-CAN adapter.")
+    if len(found) > 1:
+        names = ", ".join(p.device for p in found)
+        raise SystemExit(f"[port] Multiple serial ports found ({names}); pass --port explicitly.")
+    print(f"[port] auto-detected {found[0].device} ({found[0].description})")
+    return found[0].device
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="PV mode gripper gentle close")
-    ap.add_argument("--port", default="COM5", help="serial port")
+    ap.add_argument("--port", default="auto", help="serial port; 'auto' picks the only available one")
     ap.add_argument("--baud", type=int, default=921600)
     ap.add_argument("--id", type=_parse_int, default="0x01", help="motor command CAN ID")
     ap.add_argument("--fb-id", type=_parse_int, default="0x101", help="motor feedback CAN ID")
@@ -69,6 +85,7 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=20.0, help="max time per segment [s]")
     ap.add_argument("--hold-time", type=float, default=2.0, help="grip hold duration after closing [s]")
     args = ap.parse_args()
+    args.port = _resolve_port(args.port)
 
     safe_q = PositionRange(min=min(args.open_q, args.close_q), max=max(args.open_q, args.close_q))
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)

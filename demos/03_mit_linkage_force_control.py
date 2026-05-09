@@ -69,6 +69,22 @@ def _parse_int(value: str) -> int:
     return int(value, 0)
 
 
+def _resolve_port(port: str) -> str:
+    """Return *port* unchanged, or auto-detect a single available COM port."""
+    if port and port.lower() != "auto":
+        return port
+    from serial.tools import list_ports
+
+    found = list(list_ports.comports())
+    if not found:
+        raise SystemExit("[port] No serial ports found. Plug in the serial-to-CAN adapter.")
+    if len(found) > 1:
+        names = ", ".join(p.device for p in found)
+        raise SystemExit(f"[port] Multiple serial ports found ({names}); pass --port explicitly.")
+    print(f"[port] auto-detected {found[0].device} ({found[0].description})")
+    return found[0].device
+
+
 def _clamp(value: float, low: float, high: float) -> float:
     if value < low:
         return low
@@ -158,7 +174,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="MIT linkage gripper force control demo with contact detection and hold phase"
     )
-    ap.add_argument("--port", default="COM12", help="serial port, e.g. COM8 or /dev/ttyUSB0")
+    ap.add_argument("--port", default="auto", help="serial port; 'auto' picks the only available one (e.g. COM8 or /dev/ttyUSB0)")
     ap.add_argument("--baud", type=int, default=921600, help="serial baud rate")
     ap.add_argument("--id", type=_parse_int, default="0x01", help="motor command CAN ID")
     ap.add_argument("--fb-id", type=_parse_int, default="0x101", help="motor feedback CAN ID")
@@ -258,6 +274,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_arg_parser().parse_args()
+    args.port = _resolve_port(args.port)
 
     # Backwards compatibility for old default values.
     # Tests showed that -1.25 Nm is sufficient for stable closing;

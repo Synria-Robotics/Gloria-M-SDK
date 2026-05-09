@@ -62,6 +62,22 @@ def _parse_int(value: str) -> int:
     return int(value, 0)
 
 
+def _resolve_port(port: str) -> str:
+    """返回 *port* 原值，或在只有一个可用串口时自动选中。"""
+    if port and port.lower() != "auto":
+        return port
+    from serial.tools import list_ports
+
+    found = list(list_ports.comports())
+    if not found:
+        raise SystemExit("[port] 未检测到串口，请插入串口转 CAN 适配器。")
+    if len(found) > 1:
+        names = ", ".join(p.device for p in found)
+        raise SystemExit(f"[port] 检测到多个串口 ({names})，请使用 --port 明确指定。")
+    print(f"[port] 自动选择 {found[0].device} ({found[0].description})")
+    return found[0].device
+
+
 @dataclass(frozen=True)
 class CloseSample:
     elapsed_s: float
@@ -140,7 +156,7 @@ def _write_binned_baseline_csv(path: Path, samples: List[CloseSample], bin_width
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="MIT 模式夹爪闭合测试 / 空载基线标定")
-    ap.add_argument("--port", default="COM12", help="串口号，例如 COM8 或 /dev/ttyUSB0")
+    ap.add_argument("--port", default="auto", help="串口号，auto 表示自动选择唯一串口")
     ap.add_argument("--baud", type=int, default=921600, help="串口波特率")
     ap.add_argument("--id", type=_parse_int, default="0x01", help="电机命令 CAN ID")
     ap.add_argument("--fb-id", type=_parse_int, default="0x201", help="电机反馈 CAN ID")
@@ -161,6 +177,7 @@ def main() -> int:
     ap.add_argument("--loop-sleep", type=float, default=0.002, help="控制循环休眠时间 [s]")
     ap.add_argument("--print-hz", type=float, default=10.0, help="状态打印频率 [Hz]")
     args = ap.parse_args()
+    args.port = _resolve_port(args.port)
 
     if args.close_tau >= 0.0:
         raise ValueError("close-tau 必须为负，负扭矩表示闭合")
