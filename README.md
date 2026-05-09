@@ -78,7 +78,8 @@ User code
     ▼
 ┌─────────────────────────────────────────┐
 │  Facade    GloriaGripper  (client.py)   │  ← Recommended entry point
-│  .motor / .motion / .params / .state    │
+│  .motor / .motion / .params             │
+│  .state / .current_mode / .is_connected │
 └──────────────────┬──────────────────────┘
                    │
                    ▼
