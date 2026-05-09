@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gloria-m-sdk"
+version = "1.0.3"
+description = "Python SDK for Gloria-M series gripper actuators via serial-to-CAN adapter"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{name = "Synria Robotics Team", email = "contact@synriarobotics.ai"}]
+requires-python = ">=3.11"
+dependencies = ["pyserial>=3.5"]
+keywords = ["robotics", "gripper", "actuator", "CAN", "MIT", "motor", "serial"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://synriarobotics.ai"
+Repository = "https://github.com/Synria-Robotics/Gloria-M-SDK"
+Changelog = "https://github.com/Synria-Robotics/Gloria-M-SDK/releases/tag/v1.0.3"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
