@@ -32,7 +32,7 @@ Calibration note:
         #  angle_rad:radius_mm pairs, at least two points, ascending angle order
 
 Usage:
-    python 03_mit_linkage_force_control.py [--port COM12] [--id 0x01]
+    python 03_mit_linkage_force_control.py [--port auto] [--id 0x01]
         [--target-force 15] [--hold-seconds 5] [--cycles 1]
 
 Exit:

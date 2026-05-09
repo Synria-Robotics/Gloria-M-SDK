@@ -17,7 +17,7 @@ How it works:
     for the required dwell time, the direction switches automatically.
 
 Usage:
-    python 01_gripper_quicktest.py [--port COM5] [--id 0x01] [--close-q -2.7] [--vel 1.0]
+    python 01_gripper_quicktest.py [--port auto] [--id 0x01] [--close-q -2.7] [--vel 1.0]
 
 Exit:
     Press Ctrl+C to exit; the motor will be disabled automatically.

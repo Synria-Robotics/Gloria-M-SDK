@@ -20,7 +20,7 @@ How it works:
     before exiting.
 
 Usage:
-    python 02_pv_control.py [--port COM5] [--id 0x01] [--close-q -2.0] [--close-vel 0.3]
+    python 02_pv_control.py [--port auto] [--id 0x01] [--close-q -2.0] [--close-vel 0.3]
 
 Exit:
     Press Ctrl+C to exit; the motor will be disabled automatically.

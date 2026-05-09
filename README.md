@@ -6,7 +6,7 @@
 
 Copyright (c) 2026 Synria Robotics Co., Ltd.  
 Website: https://synriarobotics.ai  
-Repository: https://github.com/Synria-Robotics/Gloria-M-SDK/tree/v1.0.3
+Repository: https://github.com/Synria-Robotics/Gloria-M-SDK/tree/main
 
 ## Features
 
@@ -119,7 +119,7 @@ Cross-cutting (any layer may import):
 ```python
 from gloria_m_sdk import GloriaGripper, ControlMode
 
-with GloriaGripper("COM5") as g:
+with GloriaGripper("COM5") as g:  # replace COM5 with your actual port
     g.motor.set_mode(ControlMode.POS_VEL)
     g.motor.enable()
     g.motor.refresh()
@@ -133,7 +133,7 @@ with GloriaGripper("COM5") as g:
 
 ```python
 GloriaGripper(
-    port,                    # "COM5" or "/dev/ttyUSB0"
+    port,                    # e.g. "COM5" or "/dev/ttyUSB0"; use 'auto' to auto-detect
     *,
     baudrate=921_600,
     command_id=0x01,         # CAN ID for commands
@@ -210,7 +210,7 @@ used directly in the demo scripts.
 The gripper repeatedly moves between open and close positions to quickly verify that the PV control mode is working correctly.
 
 ```bash
-python demos/01_gripper_quicktest.py --port COM5 --id 0x01 --close-q 0.0 --open-q 2.5 --vel 1.0
+python demos/01_gripper_quicktest.py --port auto --id 0x01 --close-q 0.0 --open-q 2.5 --vel 1.0
 ```
 
 ### 02_pv_control.py - PV mode gentle close
@@ -218,7 +218,7 @@ python demos/01_gripper_quicktest.py --port COM5 --id 0x01 --close-q 0.0 --open-
 Opens to position 2.5, then closes to position 0 at a low speed in PV mode. Suitable for gently gripping delicate objects.
 
 ```bash
-python demos/02_pv_control.py --port COM5 --open-q 2.5 --close-q 0.0 --close-vel 0.3
+python demos/02_pv_control.py --port auto --open-q 2.5 --close-q 0.0 --close-vel 0.3
 ```
 
 ### 03_mit_linkage_force_control.py - MIT linkage gripper force control
@@ -226,13 +226,13 @@ python demos/02_pv_control.py --port COM5 --open-q 2.5 --close-q 0.0 --close-vel
 Approach-contact-hold-release cycle using MIT torque control with a configurable moment-arm profile for accurate fingertip force estimation.
 
 ```bash
-python demos/03_mit_linkage_force_control.py --port COM5 --open-q 2.77 --close-q 0.003 --target-force 15
+python demos/03_mit_linkage_force_control.py --port auto --open-q 2.77 --close-q 0.003 --target-force 15
 ```
 
 For the 4340 high-force gripper version:
 
 ```bash
-python demos/03_mit_linkage_force_control.py --port COM5 --baseline-csv ".\demos\baseline\close_baseline_4340.csv" --target-force 30 --contact-force 60
+python demos/03_mit_linkage_force_control.py --port auto --baseline-csv ".\demos\baseline\close_baseline_4340.csv" --target-force 30 --contact-force 60
 ```
 
 **MIT control formula:**
@@ -246,14 +246,14 @@ This script closes the gripper with a fixed negative torque in MIT mode while no
 Run it with the gripper unloaded:
 
 ```bash
-python demos/mit_close_baseline.py --port COM5 --close-tau -1.25
+python demos/mit_close_baseline.py --port auto --close-tau -1.25
 ```
 
 Common options:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--port` | COM12 | Serial port |
+| `--port` | auto | Serial port |
 | `--baud` | 921600 | Serial baud rate |
 | `--id` | 0x01 | Motor command CAN ID |
 | `--fb-id` | 0x201 | Motor feedback CAN ID |
@@ -302,7 +302,7 @@ The binned baseline CSV groups raw samples with nearby positions and averages ea
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--port` | COM5 | Serial port |
+| `--port` | auto | Serial port |
 | `--baud` | 921600 | Serial baud rate |
 | `--id` | 0x01 | Motor command CAN ID |
 | `--fb-id` | 0x101 | Motor feedback CAN ID |

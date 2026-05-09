@@ -26,7 +26,7 @@ Calibration workflow:
     3. Re-run after any mechanical change (e.g. re-greasing, part replacement).
 
 Usage:
-    python mit_close_baseline.py [--port COM12] [--id 0x01] [--close-tau -1.25]
+    python mit_close_baseline.py [--port auto] [--id 0x01] [--close-tau -1.25]
 
 Exit:
     Press Ctrl+C to exit early; partial data will still be saved.
