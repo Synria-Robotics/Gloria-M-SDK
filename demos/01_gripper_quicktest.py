@@ -36,12 +36,10 @@ if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
 from gloria_m_sdk import (
-    Actuator,
-    CanController,
     ControlMode,
+    GloriaGripper,
     Limits,
     PositionRange,
-    SerialCanAdapter,
 )
 
 
@@ -85,35 +83,25 @@ def main() -> int:
     safe_q = PositionRange(min=min(args.open_q, args.close_q), max=max(args.open_q, args.close_q))
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
-    act = Actuator(
-        name="gripper_cycle",
+    with GloriaGripper(
+        args.port,
+        baudrate=args.baud,
         command_id=args.id,
         feedback_id=args.fb_id,
         limits=limits,
         safe_position=safe_q,
-    )
-
-    with SerialCanAdapter(args.port, baudrate=args.baud, timeout=0.5) as adapter:
-        ctrl = CanController(adapter)
-        ctrl.register(act)
-
-        # Write PMAX/VMAX/TMAX to the motor and save to flash.
-        # This ensures the motor clamps all commands to safe ranges even if
-        # a software bug sends an out-of-range value.
-        ctrl.apply_limits_and_save(act, limits)
-
-        # Switch to PV mode; the motor echoes back the new mode in its
-        # feedback frame.  If 'ok' is False the motor likely isn't
-        # responding — check CAN wiring and 24 V power.
-        ok = ctrl.set_control_mode(act, ControlMode.POS_VEL)
-        print(f"[mode] set PV: {ok}")
-        ctrl.enable(act)
+    ) as g:
+        # apply_limits=True (default) writes PMAX/VMAX/TMAX to flash so the
+        # motor clamps commands at the firmware level even if user code errs.
+        g.motor.set_mode(ControlMode.POS_VEL)
+        print("[mode] PV: ok")
+        g.motor.enable()
         print("[enable] ok")
 
         # Fetch the current position so the first segment starts from a
         # known state rather than from zero.
-        ctrl.refresh_state(act)
-        print(f"[init] position = {act.state.position:.3f} rad")
+        g.motor.refresh()
+        print(f"[init] position = {g.state.position:.3f} rad")
 
         cycle = 0
         last_print_at = 0.0
@@ -135,18 +123,18 @@ def main() -> int:
                 while True:
                     # Send PV command every loop iteration.  The motor
                     # firmware smooths the trajectory internally.
-                    ctrl.send_pos_vel(act, position=target, velocity=args.vel, poll=True)
+                    g.motion.send_pos_vel(position=target, velocity=args.vel, poll=True)
 
                     elapsed = time.perf_counter() - seg_start
-                    pos_err = abs(act.state.position - target)
+                    pos_err = abs(g.state.position - target)
 
                     # Rate-limited console output so the terminal doesn't flood.
                     if (time.time() - last_print_at) >= 1.0 / max(1.0, float(args.print_hz)):
                         last_print_at = time.time()
                         print(
                             f"  t={elapsed:5.2f}s | "
-                            f"target={target:+.3f} q_fb={act.state.position:+.3f} | "
-                            f"vel={act.state.velocity:+.3f} tau={act.state.torque:+.3f}"
+                            f"target={target:+.3f} q_fb={g.state.position:+.3f} | "
+                            f"vel={g.state.velocity:+.3f} tau={g.state.torque:+.3f}"
                         )
 
                     # Settle detection: position must stay within the threshold
@@ -163,7 +151,7 @@ def main() -> int:
                     # Timeout guard: switch direction even if target not reached
                     # (e.g. gripper hit a mechanical stop before the target angle).
                     if elapsed > args.timeout:
-                        print(f"  Timeout switch (q_fb={act.state.position:+.3f}, error {pos_err:.3f} rad)")
+                        print(f"  Timeout switch (q_fb={g.state.position:+.3f}, error {pos_err:.3f} rad)")
                         break
 
                     time.sleep(float(args.loop_sleep))
@@ -174,7 +162,7 @@ def main() -> int:
             print("\n[ctrl+c] exiting")
         finally:
             # Always de-energize the motor on exit, even if an exception occurred.
-            ctrl.disable(act)
+            g.motor.disable()
             print("[disable] ok")
 
     return 0

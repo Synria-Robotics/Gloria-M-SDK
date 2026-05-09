@@ -56,6 +56,9 @@ from .constants import MIT_SAFE_Q_MAX, MIT_SAFE_Q_MIN
 from .registers import Variable
 from .gripper_baseline import BaselinePoint, TorqueBaseline
 
+# --- Transport abstraction (testing / custom backends) ---
+from .transport import ICanTransport, FakeCanAdapter
+
 __all__ = [
     # Facade
     "GloriaGripper",
@@ -86,5 +89,8 @@ __all__ = [
     # Constants
     "MIT_SAFE_Q_MAX",
     "MIT_SAFE_Q_MIN",
+    # Transport abstraction
+    "ICanTransport",
+    "FakeCanAdapter",
 ]
 

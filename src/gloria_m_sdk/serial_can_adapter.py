@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import time
 from typing import Iterable, List, Optional, Tuple
 
 import serial
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,7 @@ class SerialCanAdapter:
         frame[13] = can_id & 0xFF
         frame[14] = (can_id >> 8) & 0xFF
         frame[21:29] = data8
+        _log.debug("TX can_id=0x%03X data=%s", can_id, data8.hex())
         self._ser.write(bytes(frame))
 
     def read_packets(self) -> List[CanPacket]:
@@ -104,7 +108,9 @@ class SerialCanAdapter:
             cmd = frame[1]
             can_id = (frame[6] << 24) | (frame[5] << 16) | (frame[4] << 8) | frame[3]
             payload = bytes(frame[7:15])
-            packets.append(CanPacket(can_id=can_id, cmd=cmd, data=payload))
+            pkt = CanPacket(can_id=can_id, cmd=cmd, data=payload)
+            _log.debug("RX can_id=0x%03X cmd=0x%02X data=%s", can_id, cmd, payload.hex())
+            packets.append(pkt)
         return packets
 
     def read_packets_until(

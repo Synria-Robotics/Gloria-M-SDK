@@ -13,8 +13,9 @@
 - 通过串口转 CAN 适配器与 Gloria-M 系列电机通信
 - 支持 **MIT 模式**（kp/kd/扭矩前馈控制）和 **PV 模式**（位置 + 速度控制）
 - 提供参数读写、电机使能和失能等基础控制能力
-- 内置 MIT 协议打包/解包，以及反馈状态解析
-
+- 内置 MIT 协议打包/解包，以及反馈状态解析- **传输层抽象**（`ICanTransport`）— 替换串口后端无需修改任何其他代码
+- **`FakeCanAdapter`** — 纯内存实现，无需硬件即可运行全量单元测试
+- **结构化日志**（`logging`）— 连接、模式切换、参数读取超时均会输出日志记录
 ## 项目结构
 
 ```
@@ -23,6 +24,7 @@ Gloria-M-SDK/
 |   |-- __init__.py         # 包入口，导出公开 API
 |   |-- client.py           # 门面层：GloriaGripper（推荐入口）
 |   |-- exceptions.py       # 异常体系（GloriaSdkError 及子类）
+|   |-- transport.py        # ICanTransport 协议 + FakeCanAdapter（测试捆）
 |   |-- api/                # API 层：按领域拆分的子 API
 |   |   |-- __init__.py
 |   |   |-- base.py         # BaseAPI（共享控制器访问）
@@ -38,12 +40,18 @@ Gloria-M-SDK/
 |   |-- types.py            # 数据类型（Limits、ControlMode 等）
 |   |-- constants.py        # 常量定义
 |   `-- gripper_baseline.py # 夹爪扭矩基线
+|-- tests/                  # Pytest 测试套件（无需硬件）
+|   |-- conftest.py         # 公共 fixture（FakeCanAdapter 支撑的 gripper）
+|   |-- test_protocol_mit.py# MIT 位打包 round-trip 测试
+|   |-- test_baseline.py    # TorqueBaseline 加载与插分测试
+|   \-- test_client.py      # GloriaGripper 门面集成测试
 |-- demos/                  # 示例脚本
 |   |-- 01_gripper_quicktest.py  # PV 模式往复运动测试
 |   |-- 02_pv_control.py        # PV 模式柔顺闭合
 |   |-- 03_mit_linkage_force_control.py  # MIT 连杆夹爪力控
 |   |-- mit_close_baseline.py   # MIT 空载闭合基线采集
 |   `-- baseline/               # 基线数据 CSV 输出目录
+|-- CHANGELOG.md
 |-- pyproject.toml
 |-- requirements.txt
 |-- README.md
@@ -66,6 +74,12 @@ pip install -r requirements.txt
 
 ```bash
 pip install -e .
+```
+
+一并安装测试依赖（pytest）：
+
+```bash
+pip install -e ".[dev]"
 ```
 
 ## SDK 分层设计
@@ -140,8 +154,9 @@ GloriaGripper(
     feedback_id=0x101,       # 电机反馈 CAN ID
     limits=None,             # Limits(pmax, vmax, tmax)，默认 (3.14, 10, 12)
     safe_position=None,      # PositionRange(min, max) — 位置限幅
-    baseline_csv=None,       # 空载抉矩基线 CSV 路径
+    baseline_csv=None,       # 空载扭矩基线 CSV 路径
     timeout=0.5,             # 串口读超时 [s]
+    _transport=None,         # 测试锆：传入 FakeCanAdapter 替代实际串口
 )
 ```
 
@@ -149,7 +164,7 @@ GloriaGripper(
 
 | 属性 | 类型 | 说明 |
 |------|------|------|
-| `state` | `ActuatorState` | 最新反馈快照（位置、速度、扔矩） |
+| `state` | `ActuatorState` | 最新反馈快照（位置、速度、扭矩） |
 | `current_mode` | `ControlMode \| None` | 电机最后确认的控制模式；`set_mode()` 前为 `None` |
 | `is_connected` | `bool` | `True` 表示串口已打开 |
 
@@ -168,7 +183,7 @@ GloriaGripper(
 
 | 方法 | 说明 |
 |------|------|
-| `send_mit(*, kp, kd, q, dq, tau)` | 发送 MIT 抉矩控制帧 |
+| `send_mit(*, kp, kd, q, dq, tau)` | 发送 MIT 扭矩控制帧 |
 | `send_pos_vel(*, position, velocity)` | 发送 PV 位置+速度帧 |
 
 ### GloriaGripper.params — ParamAPI
@@ -190,8 +205,64 @@ GloriaSdkError               # 基类，一网打尽
 ├── GloriaConfigError         # 参数越界
 └── GloriaModeError           # 模式切换未确认
 ```
-### 01_gripper_quicktest.py - PV 模式往复运动测试
 
+### 底层访问（高级用户）
+
+`CanController` 和 `SerialCanAdapter` 仍然导出并在示例脚本中直接使用。
+
+| 符号 | 说明 |
+|------|------|
+| `CanController` | 直接命令下发 / 反馈解析 |
+| `SerialCanAdapter` | 原始串口转 CAN 传输 |
+| `ICanTransport` | 自定义传输层的结构型协议 |
+| `FakeCanAdapter` | 纯内存传输捆，无硬件可测试 |
+| `Variable` | 寄存器 ID 枚举（RID） |
+| `TorqueBaseline` | 空载扭矩基线，用于力估算 |
+
+## 无硬件测试
+
+`FakeCanAdapter` 是 `SerialCanAdapter` 的纯内存替代品。通过 `_transport` 参数注入，无需连接任何硬件即可运行全量 SDK 逻辑：
+
+```python
+from gloria_m_sdk import FakeCanAdapter, GloriaGripper, ControlMode
+from gloria_m_sdk.registers import Variable
+
+fake = FakeCanAdapter()
+# 模拟电机在 set_mode() 后回复 CTRL_MODE = 2（POS_VEL）
+fake.queue_param_reply(can_id=0x101, rid=int(Variable.CTRL_MODE),
+                       value=int(ControlMode.POS_VEL), is_u32=True)
+
+with GloriaGripper("任意端口", _transport=fake) as g:
+    g.motor.set_mode(ControlMode.POS_VEL)
+    assert g.current_mode == ControlMode.POS_VEL
+```
+
+运行内置测试套件（60 项测试，约 1 秒，无需硬件）：
+
+```bash
+pytest tests/ -v
+```
+
+## 开启日志
+
+SDK 通过标准 `logging` 模块输出日志记录，开启方式：
+
+```python
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
+```
+
+| 级别 | 触发事件 |
+|------|---------|
+| `INFO` | 连接、断开、使能、失能、模式确认、限制应用 |
+| `WARNING` | 模式切换超时、`read_param` 超时、`set_zero`（永久改变零点） |
+| `DEBUG` | 每一条 CAN 帧收发 |
+
+## 示例
+### 01_gripper_quicktest.py - PV 模式往复运动测试
 夹爪会在打开位置和闭合位置之间反复运动，用于快速验证 PV 控制模式是否正常工作。
 
 ```bash

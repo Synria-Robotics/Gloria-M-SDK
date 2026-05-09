@@ -54,6 +54,9 @@ from .gripper_baseline import TorqueBaseline
 from .serial_can_adapter import SerialCanAdapter
 from .types import ControlMode, Limits, PositionRange  # noqa: F401 — re-exported for users
 
+import logging
+_log = logging.getLogger(__name__)
+
 _DEFAULT_LIMITS = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
 
@@ -113,11 +116,13 @@ class GloriaGripper:
         safe_position: Optional[PositionRange] = None,
         baseline_csv: Optional[str] = None,
         timeout: float = 0.5,
+        _transport: Optional[object] = None,
     ) -> None:
         self._port = port
         self._baudrate = baudrate
         self._timeout = timeout
         self._limits = limits if limits is not None else _DEFAULT_LIMITS
+        self._transport_override = _transport  # testing hook — not part of public API
 
         self._act = Actuator(
             name="gripper",
@@ -127,7 +132,7 @@ class GloriaGripper:
             safe_position=safe_position,
         )
 
-        self._adapter: Optional[SerialCanAdapter] = None
+        self._adapter: Optional[object] = None
         self._ctrl: Optional[CanController] = None
 
         # Optional torque baseline
@@ -164,21 +169,31 @@ class GloriaGripper:
         if self._adapter is not None:
             return  # already connected
 
-        try:
-            self._adapter = SerialCanAdapter(
-                self._port, baudrate=self._baudrate, timeout=self._timeout
-            )
-        except _serial.SerialException as exc:
-            self._adapter = None
-            raise GloriaConnectionError(
-                f"Cannot open port {self._port!r}: {exc}"
-            ) from exc
+        if self._transport_override is not None:
+            _log.debug("Using injected transport (hardware-free / test mode)")
+            self._adapter = self._transport_override
+        else:
+            _log.info("Opening serial port %r at %d baud", self._port, self._baudrate)
+            try:
+                self._adapter = SerialCanAdapter(
+                    self._port, baudrate=self._baudrate, timeout=self._timeout
+                )
+            except _serial.SerialException as exc:
+                self._adapter = None
+                raise GloriaConnectionError(
+                    f"Cannot open port {self._port!r}: {exc}"
+                ) from exc
 
         self._ctrl = CanController(self._adapter)
         self._ctrl.register(self._act)
 
         if apply_limits:
+            _log.info("Applying limits: pmax=%.3f vmax=%.3f tmax=%.3f",
+                      self._limits.pmax, self._limits.vmax, self._limits.tmax)
             self._ctrl.apply_limits_and_save(self._act, self._limits)
+
+        _log.info("GloriaGripper connected (port=%r, cmd_id=0x%03X, fb_id=0x%03X)",
+                  self._port, self._act.command_id, self._act.feedback_id)
 
     def disconnect(self) -> None:
         """Close the serial port and release all resources.
@@ -195,7 +210,9 @@ class GloriaGripper:
             ``gripper.motor.disable()`` before disconnecting.
         """
         if self._adapter is not None:
-            self._adapter.close()
+            _log.info("Disconnecting GloriaGripper (port=%r)", self._port)
+            if hasattr(self._adapter, "close"):
+                self._adapter.close()  # type: ignore[union-attr]
             self._adapter = None
         self._ctrl = None
 

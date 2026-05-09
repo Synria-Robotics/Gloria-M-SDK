@@ -14,6 +14,9 @@ Repository: https://github.com/Synria-Robotics/Gloria-M-SDK/tree/main
 - Supports **MIT mode** (kp/kd/torque feedforward control) and **PV mode** (position + velocity)
 - Provides parameter read/write and enable/disable primitives
 - Built-in MIT protocol packing/unpacking and feedback state parsing
+- **Transport abstraction** (`ICanTransport`) — swap the serial backend without touching any other code
+- **`FakeCanAdapter`** — full in-memory stub for hardware-free unit testing
+- **Structured logging** — connect/disconnect, mode switches, and parameter timeouts all emit log records
 
 ## Project Structure
 
@@ -23,6 +26,7 @@ Gloria-M-SDK/
 |   |-- __init__.py         # Package entry point; exports public API
 |   |-- client.py           # Facade: GloriaGripper (recommended entry point)
 |   |-- exceptions.py       # Exception hierarchy (GloriaSdkError and subclasses)
+|   |-- transport.py        # ICanTransport protocol + FakeCanAdapter (testing stub)
 |   |-- api/                # API layer: domain-specific sub-APIs
 |   |   |-- __init__.py
 |   |   |-- base.py         # BaseAPI (shared controller access)
@@ -38,12 +42,18 @@ Gloria-M-SDK/
 |   |-- types.py            # Data types (Limits, ControlMode, PositionRange)
 |   |-- constants.py        # Constant definitions
 |   `-- gripper_baseline.py # Gripper torque baseline
+|-- tests/                  # Pytest test suite (no hardware required)
+|   |-- conftest.py         # Shared fixtures (FakeCanAdapter-backed gripper)
+|   |-- test_protocol_mit.py# MIT bit-packing round-trip tests
+|   |-- test_baseline.py    # TorqueBaseline CSV loading and interpolation tests
+|   `-- test_client.py      # GloriaGripper facade integration tests
 |-- demos/                  # Example scripts
 |   |-- 01_gripper_quicktest.py  # PV mode reciprocating cycle test
 |   |-- 02_pv_control.py        # PV mode gentle close
 |   |-- 03_mit_linkage_force_control.py  # MIT linkage gripper force control
 |   |-- mit_close_baseline.py   # MIT no-load close baseline capture
 |   `-- baseline/               # Baseline data CSV output
+|-- CHANGELOG.md
 |-- pyproject.toml
 |-- requirements.txt
 |-- README.md
@@ -66,6 +76,12 @@ Or install in editable/development mode:
 
 ```bash
 pip install -e .
+```
+
+To also install test dependencies (pytest):
+
+```bash
+pip install -e ".[dev]"
 ```
 
 ## SDK Layers
@@ -142,6 +158,7 @@ GloriaGripper(
     safe_position=None,      # PositionRange(min, max) — position clamp
     baseline_csv=None,       # path to no-load torque baseline CSV
     timeout=0.5,             # serial read timeout [s]
+    _transport=None,         # testing hook: inject a FakeCanAdapter instead of opening a port
 )
 ```
 
@@ -200,8 +217,55 @@ used directly in the demo scripts.
 |--------|-------------|
 | `CanController` | Direct motor command / feedback parsing |
 | `SerialCanAdapter` | Raw serial-to-CAN transport |
+| `ICanTransport` | Structural protocol for custom transport backends |
+| `FakeCanAdapter` | In-memory transport stub for hardware-free testing |
 | `Variable` | Register ID enum (RID) |
 | `TorqueBaseline` | No-load torque baseline for force estimation |
+
+## Testing without hardware
+
+`FakeCanAdapter` is an in-memory drop-in for `SerialCanAdapter`. Inject it
+via the `_transport` parameter to run the full SDK logic without a physical
+motor or serial port:
+
+```python
+from gloria_m_sdk import FakeCanAdapter, GloriaGripper, ControlMode
+from gloria_m_sdk.registers import Variable
+
+fake = FakeCanAdapter()
+# Simulate the motor echoing CTRL_MODE = 2 (POS_VEL) after set_mode()
+fake.queue_param_reply(can_id=0x101, rid=int(Variable.CTRL_MODE),
+                       value=int(ControlMode.POS_VEL), is_u32=True)
+
+with GloriaGripper("unused", _transport=fake) as g:
+    g.motor.set_mode(ControlMode.POS_VEL)
+    assert g.current_mode == ControlMode.POS_VEL
+```
+
+Run the built-in test suite (60 tests, ~1 s, no hardware):
+
+```bash
+pytest tests/ -v
+```
+
+## Enabling logging
+
+The SDK emits log records at `INFO` / `WARNING` / `DEBUG` through the
+standard `logging` module. Enable them with:
+
+```python
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
+```
+
+| Level | Events |
+|-------|--------|
+| `INFO` | connect, disconnect, enable, disable, mode confirmed, limits applied |
+| `WARNING` | mode switch timeout, `read_param` timeout, `set_zero` (destructive) |
+| `DEBUG` | every CAN frame TX/RX |
 
 ## Demos
 

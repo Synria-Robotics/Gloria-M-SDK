@@ -39,12 +39,10 @@ if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
 from gloria_m_sdk import (
-    Actuator,
-    CanController,
     ControlMode,
+    GloriaGripper,
     Limits,
     PositionRange,
-    SerialCanAdapter,
 )
 
 
@@ -90,62 +88,49 @@ def main() -> int:
     safe_q = PositionRange(min=min(args.open_q, args.close_q), max=max(args.open_q, args.close_q))
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
-    act = Actuator(
-        name="gripper_pv_gentle",
+    with GloriaGripper(
+        args.port,
+        baudrate=args.baud,
         command_id=args.id,
         feedback_id=args.fb_id,
         limits=limits,
         safe_position=safe_q,
-    )
-
-    with SerialCanAdapter(args.port, baudrate=args.baud, timeout=0.5) as adapter:
-        ctrl = CanController(adapter)
-        ctrl.register(act)
-
-        # Write PMAX/VMAX/TMAX limits and save to flash.
-        # The motor will clamp all position and velocity commands to these
-        # ranges at the firmware level, providing a hardware safety net.
-        ctrl.apply_limits_and_save(act, limits)
-
-        # Switch to PV mode.  A False return means the motor didn't respond —
-        # the motor may still switch correctly but we warn the user.
-        ok = ctrl.set_control_mode(act, ControlMode.POS_VEL)
-        print(f"[mode] set PV: {ok}")
-        if not ok:
-            print("[warn] mode switch not confirmed, motor may not have responded, retrying...")
-        ctrl.enable(act)
+    ) as g:
+        # apply_limits=True (default) writes PMAX/VMAX/TMAX to flash so the
+        # motor clamps commands at the firmware level even if user code errs.
+        g.motor.set_mode(ControlMode.POS_VEL)
+        print("[mode] PV: ok")
+        g.motor.enable()
         print("[enable] ok")
 
         # Read the initial position before issuing any move commands.
-        ctrl.refresh_state(act)
-        print(f"[init] position = {act.state.position:.3f} rad")
+        g.motor.refresh()
+        print(f"[init] position = {g.state.position:.3f} rad")
 
         try:
             # ---- Phase 1: open to open_q ----
-            open_q = act.clamp_position(args.open_q)
-            print(f"\n=== Phase 1: open to {open_q:.2f} rad ===")
-            _move_to(ctrl, act, target=open_q, velocity=args.open_vel,
+            print(f"\n=== Phase 1: open to {args.open_q:.2f} rad ===")
+            _move_to(g, target=args.open_q, velocity=args.open_vel,
                      loop_sleep=args.loop_sleep, print_hz=args.print_hz,
                      settle_threshold=args.settle_threshold, settle_time=args.settle_time,
                      timeout=args.timeout)
-            print(f"\n  Open complete, current position = {act.state.position:.3f} rad")
+            print(f"\n  Open complete, current position = {g.state.position:.3f} rad")
             time.sleep(0.5)
 
             # ---- Phase 2: gentle close to close_q ----
-            close_q = act.clamp_position(args.close_q)
-            print(f"\n=== Phase 2: gentle close to {close_q:.2f} rad ===")
-            _move_to(ctrl, act, target=close_q, velocity=args.close_vel,
+            print(f"\n=== Phase 2: gentle close to {args.close_q:.2f} rad ===")
+            _move_to(g, target=args.close_q, velocity=args.close_vel,
                      loop_sleep=args.loop_sleep, print_hz=args.print_hz,
                      settle_threshold=args.settle_threshold, settle_time=args.settle_time,
                      timeout=args.timeout)
-            print(f"\n  Close complete, current position = {act.state.position:.3f} rad")
+            print(f"\n  Close complete, current position = {g.state.position:.3f} rad")
 
             # Hold position: keep sending the closed position with velocity=0
             # so the motor holds stiffly rather than going limp.
             print(f"  Holding grip for {args.hold_time:.1f} s ...")
             hold_end = time.perf_counter() + args.hold_time
             while time.perf_counter() < hold_end:
-                ctrl.send_pos_vel(act, position=close_q, velocity=0.0, poll=True)
+                g.motion.send_pos_vel(position=args.close_q, velocity=0.0, poll=True)
                 time.sleep(args.loop_sleep)
 
             print("  Done!")
@@ -154,15 +139,14 @@ def main() -> int:
             print("\n[ctrl+c] exiting")
         finally:
             # Always de-energize the motor on exit.
-            ctrl.disable(act)
+            g.motor.disable()
             print("[disable] ok")
 
     return 0
 
 
 def _move_to(
-    ctrl: CanController,
-    act: Actuator,
+    g: GloriaGripper,
     *,
     target: float,
     velocity: float,
@@ -192,8 +176,7 @@ def _move_to(
 
     Parameters
     ----------
-    ctrl:             Active CanController.
-    act:              Actuator whose state is updated by each PV send.
+    g:                Connected GloriaGripper facade.
     target:           Target position [rad].
     velocity:         Speed limit [rad/s]; lower = slower and gentler.
     loop_sleep:       Sleep between iterations [s] (e.g. 0.01 s ≈ 100 Hz).
@@ -208,18 +191,18 @@ def _move_to(
     print_interval = 1.0 / max(1.0, print_hz)
 
     while True:
-        ctrl.send_pos_vel(act, position=target, velocity=velocity, poll=True)
+        g.motion.send_pos_vel(position=target, velocity=velocity, poll=True)
 
         now = time.perf_counter()
         elapsed = now - seg_start
-        pos_err = abs(act.state.position - target)
+        pos_err = abs(g.state.position - target)
 
         if (now - last_print_at) >= print_interval:
             last_print_at = now
             print(
                 f"  t={elapsed:5.2f}s | "
-                f"target={target:+.3f} q_fb={act.state.position:+.3f} | "
-                f"vel={act.state.velocity:+.3f} tau={act.state.torque:+.3f}"
+                f"target={target:+.3f} q_fb={g.state.position:+.3f} | "
+                f"vel={g.state.velocity:+.3f} tau={g.state.torque:+.3f}"
             )
 
         if pos_err < settle_threshold:
@@ -232,7 +215,7 @@ def _move_to(
             settled_at = None
 
         if elapsed > timeout:
-            print(f"  Timeout (q_fb={act.state.position:+.3f}, error {pos_err:.3f} rad)")
+            print(f"  Timeout (q_fb={g.state.position:+.3f}, error {pos_err:.3f} rad)")
             break
 
         time.sleep(loop_sleep)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import struct
 import time
 from typing import Dict, Optional
@@ -8,6 +9,11 @@ from .actuator import Actuator
 from .protocol_mit import pack_f32, pack_mit_command, unpack_f32, unpack_mit_feedback
 from .serial_can_adapter import CanPacket, SerialCanAdapter
 from .types import ControlMode, Limits
+
+if False:  # TYPE_CHECKING — avoid circular import
+    from .transport import ICanTransport
+
+_log = logging.getLogger(__name__)
 
 
 def _u32_to_bytes_le(value: int) -> bytes:
@@ -27,7 +33,7 @@ class CanController:
     feedback parsing and parameter read/write.
     """
 
-    def __init__(self, adapter: SerialCanAdapter):
+    def __init__(self, adapter: "SerialCanAdapter | ICanTransport"):
         self._adapter = adapter
         self._by_can_id: Dict[int, Actuator] = {}
 
@@ -35,6 +41,8 @@ class CanController:
         # Compatibility: packets may arrive with either command_id or feedback_id.
         self._by_can_id[actuator.command_id] = actuator
         self._by_can_id[actuator.feedback_id] = actuator
+        _log.debug("Registered actuator %r (cmd_id=0x%03X fb_id=0x%03X)",
+                   actuator.name, actuator.command_id, actuator.feedback_id)
 
     def poll(self) -> None:
         for pkt in self._adapter.read_packets():
@@ -70,15 +78,19 @@ class CanController:
     # ---------------------------
     # Basic commands
     def enable(self, act: Actuator) -> None:
+        _log.info("Enabling actuator %r (cmd_id=0x%03X)", act.name, act.command_id)
         self._control_cmd(act, 0xFC)
         time.sleep(0.1)
         self.poll()
 
     def disable(self, act: Actuator) -> None:
+        _log.info("Disabling actuator %r (cmd_id=0x%03X)", act.name, act.command_id)
         self._control_cmd(act, 0xFD)
         time.sleep(0.01)
 
     def set_zero(self, act: Actuator) -> None:
+        _log.warning("set_zero called on %r — this permanently resets the angle origin.",
+                     act.name)
         self._control_cmd(act, 0xFE)
         time.sleep(0.1)
         self.poll()
@@ -101,7 +113,10 @@ class CanController:
             time.sleep(retry_s)
             self.poll()
             if rid in act.params and int(act.params[rid]) == int(mode):
+                _log.info("Control mode confirmed: %s on %r", mode.name, act.name)
                 return True
+        _log.warning("Mode switch to %s timed out on %r (retries=%d, retry_s=%.3f)",
+                     mode.name, act.name, retries, retry_s)
         return False
 
     def refresh_state(self, act: Actuator) -> None:
@@ -154,8 +169,15 @@ class CanController:
         while time.time() < deadline:
             self.poll()
             if int(rid) in act.params:
-                return act.params[int(rid)]
+                value = act.params[int(rid)]
+                _log.debug("read_param rid=%d → %s on %r", rid, value, act.name)
+                return value
             time.sleep(0.002)
+        _log.warning(
+            "read_param timed out (rid=%d, timeout=%.3fs) on %r — "
+            "check CAN wiring and motor power",
+            rid, timeout_s, act.name,
+        )
         return None
 
 
