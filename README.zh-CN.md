@@ -79,6 +79,7 @@ python demos/02_pv_control.py --port COM5 --open-q 2.5 --close-q 0.0 --close-vel
 ### 03_mit_linkage_force_control.py - MIT 连杆夹爪力控
 
 基于 MIT 扭矩控制实现“接近 - 接触 - 保持 - 释放”流程，并通过可配置的力臂曲线估算指尖夹持力。
+如果没有指定 baseline 文件则默认选择 close_baseline_4310.csv
 
 ```bash
 python demos/03_mit_linkage_force_control.py --port COM5 --open-q 2.77 --close-q 0.003 --target-force 15
@@ -87,7 +88,7 @@ python demos/03_mit_linkage_force_control.py --port COM5 --open-q 2.77 --close-q
 使用 4340 强力版本夹爪
 
 ```bash
-python demos/03_mit_linkage_force_control.py --port COM5 --baseline-csv ".\demos\output\close_baseline_4340.csv" --target-force 30 --contact-force 60
+python demos/03_mit_linkage_force_control.py --port COM5 --baseline-csv ".\demos\baseline\close_baseline_4340.csv" --target-force 30 --contact-force 60
 ```
 
 **MIT 控制公式：**

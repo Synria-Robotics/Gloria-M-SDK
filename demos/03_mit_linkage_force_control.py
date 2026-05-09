@@ -203,8 +203,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--baseline-csv",
-        default=".\\demos\\output\\close_baseline_4310.csv",
-        help="no-load torque baseline CSV; recommended: *_binned.csv from 07_mit_close_test.py",
+        default=".\\demos\\baseline\\close_baseline_4310.csv",
+        help="no-load torque baseline CSV",
     )
 
     ap.add_argument("--target-force", type=float, default=15.0, help="target gripping force [N]")
