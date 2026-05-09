@@ -33,7 +33,8 @@ Gloria-M-SDK/
 |   |-- 01_gripper_quicktest.py  # PV mode reciprocating cycle test
 |   |-- 02_pv_control.py        # PV mode gentle close
 |   |-- 03_mit_linkage_force_control.py  # MIT linkage gripper force control
-|   `-- output/                 # Baseline data CSV output
+|   |-- mit_close_baseline.py   # MIT no-load close baseline capture
+|   `-- baseline/               # Baseline data CSV output
 |-- pyproject.toml
 |-- requirements.txt
 |-- README.md
@@ -87,12 +88,71 @@ python demos/03_mit_linkage_force_control.py --port COM5 --open-q 2.77 --close-q
 For the 4340 high-force gripper version:
 
 ```bash
-python demos/03_mit_linkage_force_control.py --port COM5 --baseline-csv ".\demos\output\close_baseline_4340.csv" --target-force 30 --contact-force 60
+python demos/03_mit_linkage_force_control.py --port COM5 --baseline-csv ".\demos\baseline\close_baseline_4340.csv" --target-force 30 --contact-force 60
 ```
 
 **MIT control formula:**
 
 $$\tau_{out} = k_p \cdot (q_{target} - q_{fb}) + k_d \cdot (dq_{target} - dq_{fb}) + \tau_{ff}$$
+
+### mit_close_baseline.py - MIT no-load close baseline capture
+
+This script closes the gripper with a fixed negative torque in MIT mode while no object is being held. It records position, velocity, feedback torque, and estimated gripping force. The generated binned baseline CSV can be used as `--baseline-csv` for `03_mit_linkage_force_control.py` to compensate for no-load friction and linkage resistance.
+
+Run it with the gripper unloaded:
+
+```bash
+python demos/mit_close_baseline.py --port COM5 --close-tau -0.20
+```
+
+Common options:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--port` | COM12 | Serial port |
+| `--baud` | 921600 | Serial baud rate |
+| `--id` | 0x01 | Motor command CAN ID |
+| `--fb-id` | 0x201 | Motor feedback CAN ID |
+| `--open-q` | 2.77 | Fully open gripper position [rad] |
+| `--close-q` | 0.003 | Closed gripper position [rad] |
+| `--close-tau` | -0.20 | Closing torque [N·m]; must be negative |
+| `--kd` | 0.8 | MIT damping term |
+| `--stop-force` | 0.0 | Stop when estimated force reaches this threshold; 0 disables it [N] |
+| `--radius-mm` | 12.0 | Effective moment arm used for force estimation [mm] |
+| `--timeout` | 3.0 | Maximum capture time [s] |
+| `--position-epsilon` | 0.02 | Closed-position tolerance [rad] |
+| `--bin-width` | 0.05 | Position bin width for the baseline curve [rad] |
+| `--save-dir` | demos/baseline | CSV output directory |
+| `--save-prefix` | close_baseline | CSV filename prefix |
+| `--no-save` | false | Run the test without saving CSV files |
+
+By default, the script writes two CSV files:
+
+```text
+demos/baseline/{save_prefix}_{timestamp}_raw.csv
+demos/baseline/{save_prefix}_{timestamp}_binned.csv
+```
+
+The raw CSV contains one row per control-loop sample:
+
+| Field | Description |
+|-------|-------------|
+| `elapsed_s` | Time since the start of the test [s] |
+| `position_rad` | Motor position feedback [rad] |
+| `velocity_rad_s` | Motor velocity feedback [rad/s] |
+| `tau_cmd_nm` | MIT torque command sent to the motor [N·m] |
+| `tau_fb_nm` | Motor feedback torque [N·m] |
+| `force_est_n` | Estimated gripping force [N], calculated as `max(0, -tau_fb_nm) / (radius_mm / 1000)` |
+
+The binned baseline CSV groups raw samples with nearby positions and averages each group for use as a baseline curve:
+
+| Field | Description |
+|-------|-------------|
+| `position_mean_rad` | Mean position within this position bin [rad] |
+| `velocity_mean_rad_s` | Mean velocity within this position bin [rad/s] |
+| `tau_fb_mean_nm` | Mean feedback torque within this position bin [N·m] |
+| `force_est_mean_n` | Mean estimated gripping force within this position bin [N] |
+| `sample_count` | Number of raw samples in this position bin |
 
 ## Common Parameters
 
@@ -104,7 +164,7 @@ $$\tau_{out} = k_p \cdot (q_{target} - q_{fb}) + k_d \cdot (dq_{target} - dq_{fb
 | `--fb-id` | 0x101 | Motor feedback CAN ID |
 | `--open-q` | 2.5 | Open position [rad] |
 | `--close-q` | 0.0 | Close position [rad] |
-| `--baseline-csv` | ".\\demos\\output\\close_baseline_4310.csv" | No-load baseline file for the gripper. Defaults to the 4310 profile; use `close_baseline_4340.csv` manually for the 4340 version |
+| `--baseline-csv` | ".\\demos\\baseline\\close_baseline_4310.csv" | No-load baseline file for the gripper. Defaults to the 4310 profile; use `close_baseline_4340.csv` manually for the 4340 version |
 | `--target-force` | 15 | Target gripping force [N] |
 | `--contact-force` | 10 | Contact detection force threshold [N]; use 60 for the 4340 gripper version |
 

@@ -33,7 +33,8 @@ Gloria-M-SDK/
 |   |-- 01_gripper_quicktest.py  # PV 模式往复运动测试
 |   |-- 02_pv_control.py        # PV 模式柔顺闭合
 |   |-- 03_mit_linkage_force_control.py  # MIT 连杆夹爪力控
-|   `-- output/                 # 基线数据 CSV 输出目录
+|   |-- mit_close_baseline.py   # MIT 空载闭合基线采集
+|   `-- baseline/               # 基线数据 CSV 输出目录
 |-- pyproject.toml
 |-- requirements.txt
 |-- README.md
@@ -95,6 +96,65 @@ python demos/03_mit_linkage_force_control.py --port COM5 --baseline-csv ".\demos
 
 $$\tau_{out} = k_p \cdot (q_{target} - q_{fb}) + k_d \cdot (dq_{target} - dq_{fb}) + \tau_{ff}$$
 
+### mit_close_baseline.py - MIT 空载闭合基线采集
+
+该脚本用于在 MIT 模式下以固定负扭矩让夹爪空载闭合，记录闭合过程中的位置、速度、反馈扭矩和估算夹持力。输出的基线文件可作为 `03_mit_linkage_force_control.py` 的 `--baseline-csv` 输入，用于扣除夹爪自身摩擦、机构阻力等空载负载。
+
+建议在没有夹持物的情况下运行：
+
+```bash
+python demos/mit_close_baseline.py --port COM5 --close-tau -1.25 
+```
+
+常用参数：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--port` | COM12 | 串口号 |
+| `--baud` | 921600 | 串口波特率 |
+| `--id` | 0x01 | 电机命令 CAN ID |
+| `--fb-id` | 0x201 | 电机反馈 CAN ID |
+| `--open-q` | 2.77 | 夹爪最大张开位置 [rad] |
+| `--close-q` | 0.003 | 夹爪闭合位置 [rad] |
+| `--close-tau` | -0.20 | 闭合方向扭矩 [N·m]，必须为负值 |
+| `--kd` | 0.8 | MIT 扭矩控制阻尼项 |
+| `--stop-force` | 0.0 | 估算夹持力达到该阈值后停止，0 表示禁用 [N] |
+| `--radius-mm` | 12.0 | 用于估算夹持力的等效力臂 [mm] |
+| `--timeout` | 3.0 | 最长采集时间 [s] |
+| `--position-epsilon` | 0.02 | 判定到达闭合位置的容差 [rad] |
+| `--bin-width` | 0.05 | 按位置生成基线曲线时的分桶宽度 [rad] |
+| `--save-dir` | demos/baseline | CSV 输出目录 |
+| `--save-prefix` | close_baseline | CSV 文件名前缀 |
+| `--no-save` | false | 只运行测试，不保存 CSV |
+
+运行完成后默认生成两个 CSV 文件：
+
+```text
+demos/baseline/{save_prefix}_{timestamp}_raw.csv
+demos/baseline/{save_prefix}_{timestamp}_binned.csv
+```
+
+原始采样 CSV 每一行对应控制循环中的一次采样：
+
+| 字段 | 说明 |
+|------|------|
+| `elapsed_s` | 从本次测试开始到当前采样点的时间 [s] |
+| `position_rad` | 当前电机位置反馈 [rad] |
+| `velocity_rad_s` | 当前电机速度反馈 [rad/s] |
+| `tau_cmd_nm` | 当前发送的 MIT 扭矩命令 [N·m] |
+| `tau_fb_nm` | 电机反馈扭矩 [N·m] |
+| `force_est_n` | 根据反馈扭矩估算的夹持力 [N]，计算方式为 `max(0, -tau_fb_nm) / (radius_mm / 1000)` |
+
+分桶基线 CSV 会把位置相近的原始采样点归为一组，并对每组求平均，适合后续作为基线曲线使用：
+
+| 字段 | 说明 |
+|------|------|
+| `position_mean_rad` | 当前位置分桶内的平均位置 [rad] |
+| `velocity_mean_rad_s` | 当前位置分桶内的平均速度 [rad/s] |
+| `tau_fb_mean_nm` | 当前位置分桶内的平均反馈扭矩 [N·m] |
+| `force_est_mean_n` | 当前位置分桶内的平均估算夹持力 [N] |
+| `sample_count` | 当前位置分桶内包含的原始采样点数量 |
+
 ## 常用参数
 
 | 参数 | 默认值 | 说明 |
@@ -105,7 +165,7 @@ $$\tau_{out} = k_p \cdot (q_{target} - q_{fb}) + k_d \cdot (dq_{target} - dq_{fb
 | `--fb-id` | 0x101 | 电机反馈 CAN ID |
 | `--open-q` | 2.5 | 打开位置 [rad] |
 | `--close-q` | 0.0 | 闭合位置 [rad] |
-| `--baseline-csv` | ".\\demos\\output\\close_baseline_4310.csv" | 云犀夹爪的基线负载文件，默认是4310的参数。4340版本需手动改用close_baseline_4340.csv |
+| `--baseline-csv` | ".\\demos\\baseline\\close_baseline_4310.csv" | 云犀夹爪的基线负载文件，默认是4310的参数。4340版本需手动改用close_baseline_4340.csv |
 | `--target-force` | 15 | 目标夹持力 |
 | `--contact-force` | 10 | 接触检测力阈值，使用4340版本夹爪时需改为60 |
 
