@@ -45,6 +45,37 @@ from gloria_m_sdk import (
     PositionRange,
 )
 
+# =============================================================================
+# ★ 用户参数区 — 直接在此修改即可，无需命令行参数
+#   (All parameters can also be overridden via command-line arguments)
+# =============================================================================
+
+# ── 连接 / Connection ─────────────────────────────────────────────────────────
+PORT          = "auto"   # 串口号；'auto' 自动检测唯一可用端口，如 'COM8'
+BAUD          = 921600   # 串口波特率
+MOTOR_ID      = 0x01     # 电机命令 CAN ID
+MOTOR_FB_ID   = 0x101    # 电机反馈 CAN ID
+
+# ── 夹爪位置 / Gripper positions ──────────────────────────────────────────────
+OPEN_Q        = 2.5      # 开口目标位置 [rad]
+CLOSE_Q       = 0.0      # 闭合目标位置 [rad]
+
+# ── 速度 / Velocities ─────────────────────────────────────────────────────────
+OPEN_VEL      = 1.0      # 开口速度 [rad/s]
+CLOSE_VEL     = 0.3      # 闭合速度 [rad/s]；越小越柔和
+
+# ── 时序 / Timing ─────────────────────────────────────────────────────────────
+HOLD_TIME     = 2.0      # 到位后夹持保持时间 [s]
+LOOP_SLEEP    = 0.01     # 控制循环间隔 [s]
+PRINT_HZ      = 5.0      # 状态打印频率 [Hz]
+
+# ── 到位判断 / Settle detection ───────────────────────────────────────────────
+SETTLE_THRESHOLD = 0.15  # 位置误差小于此值视为到位 [rad]
+SETTLE_TIME      = 0.5   # 到位后需持续稳定的时间 [s]
+TIMEOUT          = 20.0  # 每段运动最大允许时间 [s]
+
+# =============================================================================
+
 
 def _parse_int(value: str) -> int:
     return int(value, 0)
@@ -68,20 +99,20 @@ def _resolve_port(port: str) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="PV mode gripper gentle close")
-    ap.add_argument("--port", default="auto", help="serial port; 'auto' picks the only available one")
-    ap.add_argument("--baud", type=int, default=921600)
-    ap.add_argument("--id", type=_parse_int, default="0x01", help="motor command CAN ID")
-    ap.add_argument("--fb-id", type=_parse_int, default="0x101", help="motor feedback CAN ID")
-    ap.add_argument("--open-q", type=float, default=2.5, help="open position [rad]")
-    ap.add_argument("--close-q", type=float, default=0.0, help="close position [rad]")
-    ap.add_argument("--open-vel", type=float, default=1.0, help="opening velocity [rad/s]")
-    ap.add_argument("--close-vel", type=float, default=0.3, help="closing velocity [rad/s]; lower = gentler")
-    ap.add_argument("--loop-sleep", type=float, default=0.01, help="control loop sleep time [s]")
-    ap.add_argument("--print-hz", type=float, default=5.0, help="print frequency [Hz]")
-    ap.add_argument("--settle-threshold", type=float, default=0.15, help="settle threshold [rad]")
-    ap.add_argument("--settle-time", type=float, default=0.5, help="dwell time after settling [s]")
-    ap.add_argument("--timeout", type=float, default=20.0, help="max time per segment [s]")
-    ap.add_argument("--hold-time", type=float, default=2.0, help="grip hold duration after closing [s]")
+    ap.add_argument("--port", default=PORT, help="serial port; 'auto' picks the only available one")
+    ap.add_argument("--baud", type=int, default=BAUD)
+    ap.add_argument("--id", type=_parse_int, default=MOTOR_ID, help="motor command CAN ID")
+    ap.add_argument("--fb-id", type=_parse_int, default=MOTOR_FB_ID, help="motor feedback CAN ID")
+    ap.add_argument("--open-q", type=float, default=OPEN_Q, help="open position [rad]")
+    ap.add_argument("--close-q", type=float, default=CLOSE_Q, help="close position [rad]")
+    ap.add_argument("--open-vel", type=float, default=OPEN_VEL, help="opening velocity [rad/s]")
+    ap.add_argument("--close-vel", type=float, default=CLOSE_VEL, help="closing velocity [rad/s]; lower = gentler")
+    ap.add_argument("--loop-sleep", type=float, default=LOOP_SLEEP, help="control loop sleep time [s]")
+    ap.add_argument("--print-hz", type=float, default=PRINT_HZ, help="print frequency [Hz]")
+    ap.add_argument("--settle-threshold", type=float, default=SETTLE_THRESHOLD, help="settle threshold [rad]")
+    ap.add_argument("--settle-time", type=float, default=SETTLE_TIME, help="dwell time after settling [s]")
+    ap.add_argument("--timeout", type=float, default=TIMEOUT, help="max time per segment [s]")
+    ap.add_argument("--hold-time", type=float, default=HOLD_TIME, help="grip hold duration after closing [s]")
     args = ap.parse_args()
     args.port = _resolve_port(args.port)
 

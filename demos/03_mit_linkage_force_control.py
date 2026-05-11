@@ -64,6 +64,59 @@ from gloria_m_sdk import (
     Variable,
 )
 
+# =============================================================================
+# ★ 用户参数区 — 直接在此修改即可，无需命令行参数
+#   (All parameters can also be overridden via command-line arguments)
+# =============================================================================
+
+# ── 连接 / Connection ─────────────────────────────────────────────────────────
+PORT          = "auto"   # 串口号；'auto' 自动检测唯一可用端口，如 'COM8'
+BAUD          = 921600   # 串口波特率
+MOTOR_ID      = 0x01     # 电机命令 CAN ID
+MOTOR_FB_ID   = 0x101   # 电机反馈 CAN ID
+
+# ── 夹爪机械参数 / Gripper mechanics ──────────────────────────────────────────
+OPEN_Q        = 2.77    # 夹爪最大开口位置 [rad]
+CLOSE_Q       = 0.003   # 夹爪闭合位置 [rad]
+# 连杆等效力臂曲线：格式为 "角度(rad):力臂(mm),..."，至少两点，角度升序
+# 用实测值替换此占位曲线以获得更准确的指尖力估计
+RADIUS_PROFILE = "0.003:10,1.4:14,2.77:18"
+# 无负载力矩基线 CSV 文件路径（留空字符串则不加载）
+BASELINE_CSV  = ".\\demos\\baseline\\close_baseline_4310.csv"
+
+# ── 力控目标与保护 / Force targets & protection ───────────────────────────────
+TARGET_FORCE  = 15.0    # 目标夹持力 [N]
+CONTACT_FORCE = 10.0    # 接触检测力阈值 [N]（加载 baseline 后为增量值）
+ABORT_FORCE   = 500.0   # 超力保护阈值 [N]（超过立即释放）
+MAX_HOLD_TAU  = 25.0    # Hold 阶段最大允许关闭扭矩 [Nm]
+
+# ── PI 力控外环 / Outer PI force-control loop ─────────────────────────────────
+FORCE_KP      = 0.6     # 力控比例增益
+FORCE_KI      = 0.4     # 力控积分增益
+INTEGRAL_LIMIT = 20.0  # 积分限幅 [N·s]
+
+# ── MIT 内环阻尼 / Inner-loop damping (kd) ────────────────────────────────────
+APPROACH_KD   = 0.8     # 接近阶段阻尼
+HOLD_KD       = 0.5     # Hold 阶段阻尼
+RELEASE_KD    = 0.8     # 释放阶段阻尼
+
+# ── 扭矩指令 / Torque commands ────────────────────────────────────────────────
+OPEN_TAU      = 2.5     # 开口方向扭矩（必须为正） [Nm]
+CLOSE_TAU     = -2.5   # 关闭方向扭矩（必须为负） [Nm]
+
+# ── 时序 / Timing ─────────────────────────────────────────────────────────────
+HOLD_SECONDS  = 5.0     # 夹持保持时间 [s]
+CYCLES        = 1       # 运行周期数；0 = 无限循环
+LOOP_SLEEP    = 0.002   # 控制循环间隔 [s]
+PRINT_HZ      = 10.0    # 状态打印频率 [Hz]
+
+# ── 接触检测 / Contact detection ──────────────────────────────────────────────
+CONTACT_VEL_THRESHOLD = 0.08   # 堵转检测速度阈值 [rad/s]
+CONTACT_MIN_TRAVEL    = 0.05   # 触发堵转检测所需的最小位移 [rad]
+POSITION_EPSILON      = 0.02   # 阶段切换位置容差 [rad]
+
+# =============================================================================
+
 
 def _parse_int(value: str) -> int:
     return int(value, 0)
@@ -166,84 +219,80 @@ class LinkageForceProfile:
         return max(0.0, float(force_n)) * self.radius_at(q)
 
 
-def _default_radius_profile() -> str:
-    return "0.003:10,1.4:14,2.77:18"
-
-
 def _build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description="MIT linkage gripper force control demo with contact detection and hold phase"
     )
-    ap.add_argument("--port", default="auto", help="serial port; 'auto' picks the only available one (e.g. COM8 or /dev/ttyUSB0)")
-    ap.add_argument("--baud", type=int, default=921600, help="serial baud rate")
-    ap.add_argument("--id", type=_parse_int, default="0x01", help="motor command CAN ID")
-    ap.add_argument("--fb-id", type=_parse_int, default="0x101", help="motor feedback CAN ID")
+    ap.add_argument("--port", default=PORT, help="serial port; 'auto' picks the only available one (e.g. COM8 or /dev/ttyUSB0)")
+    ap.add_argument("--baud", type=int, default=BAUD, help="serial baud rate")
+    ap.add_argument("--id", type=_parse_int, default=MOTOR_ID, help="motor command CAN ID")
+    ap.add_argument("--fb-id", type=_parse_int, default=MOTOR_FB_ID, help="motor feedback CAN ID")
 
-    ap.add_argument("--open-q", type=float, default=2.77, help="gripper maximum open position [rad]")
+    ap.add_argument("--open-q", type=float, default=OPEN_Q, help="gripper maximum open position [rad]")
     ap.add_argument(
         "--close-q",
         type=float,
-        default=0.003,
+        default=CLOSE_Q,
         help="gripper closed position [rad]",
     )
     ap.add_argument(
         "--radius-profile",
-        default=_default_radius_profile(),
+        default=RADIUS_PROFILE,
         help="linkage equivalent moment-arm profile, format: q:radius_mm",
     )
     ap.add_argument(
         "--baseline-csv",
-        default=".\\demos\\baseline\\close_baseline_4310.csv",
+        default=BASELINE_CSV,
         help="no-load torque baseline CSV",
     )
 
-    ap.add_argument("--target-force", type=float, default=15.0, help="target gripping force [N]")
-    ap.add_argument("--open-tau", type=float, default=2.5, help="opening-direction torque, must be positive [Nm]")
-    ap.add_argument("--close-tau", type=float, default=-2.5, help="closing-direction torque, must be negative [Nm]")
+    ap.add_argument("--target-force", type=float, default=TARGET_FORCE, help="target gripping force [N]")
+    ap.add_argument("--open-tau", type=float, default=OPEN_TAU, help="opening-direction torque, must be positive [Nm]")
+    ap.add_argument("--close-tau", type=float, default=CLOSE_TAU, help="closing-direction torque, must be negative [Nm]")
     ap.add_argument(
         "--contact-force",
         type=float,
-        default=10.0,
+        default=CONTACT_FORCE,
         help="contact detection force threshold [N]; with baseline loaded this is the incremental gripping force threshold",
     )
     ap.add_argument(
         "--abort-force",
         type=float,
-        default=500.0,
+        default=ABORT_FORCE,
         help="force protection threshold [N]; with baseline loaded this is the incremental gripping force limit",
     )
     ap.add_argument(
         "--max-hold-tau",
         type=float,
-        default=25,
+        default=MAX_HOLD_TAU,
         help="maximum closing torque allowed during the hold phase [Nm]",
     )
 
-    ap.add_argument("--approach-kd", type=float, default=0.8, help="MIT torque control damping kd for the approach phase")
-    ap.add_argument("--hold-kd", type=float, default=0.5, help="MIT torque control damping kd for the hold phase")
-    ap.add_argument("--release-kd", type=float, default=0.8, help="MIT torque control damping kd for the release phase")
+    ap.add_argument("--approach-kd", type=float, default=APPROACH_KD, help="MIT torque control damping kd for the approach phase")
+    ap.add_argument("--hold-kd", type=float, default=HOLD_KD, help="MIT torque control damping kd for the hold phase")
+    ap.add_argument("--release-kd", type=float, default=RELEASE_KD, help="MIT torque control damping kd for the release phase")
 
-    ap.add_argument("--force-kp", type=float, default=0.6, help="outer force-control loop kp")
-    ap.add_argument("--force-ki", type=float, default=0.4, help="outer force-control loop ki")
+    ap.add_argument("--force-kp", type=float, default=FORCE_KP, help="outer force-control loop kp")
+    ap.add_argument("--force-ki", type=float, default=FORCE_KI, help="outer force-control loop ki")
     ap.add_argument(
         "--integral-limit",
         type=float,
-        default=20.0,
+        default=INTEGRAL_LIMIT,
         help="force-control integral clamp [N·s]",
     )
-    ap.add_argument("--hold-seconds", type=float, default=5.0, help="grip hold duration [s]")
-    ap.add_argument("--cycles", type=int, default=1, help="number of cycles to run; 0 = run indefinitely")
+    ap.add_argument("--hold-seconds", type=float, default=HOLD_SECONDS, help="grip hold duration [s]")
+    ap.add_argument("--cycles", type=int, default=CYCLES, help="number of cycles to run; 0 = run indefinitely")
 
     ap.add_argument(
         "--contact-vel-threshold",
         type=float,
-        default=0.08,
+        default=CONTACT_VEL_THRESHOLD,
         help="stall detection velocity threshold [rad/s]",
     )
     ap.add_argument(
         "--contact-min-travel",
         type=float,
-        default=0.05,
+        default=CONTACT_MIN_TRAVEL,
         help="minimum travel required before stall contact detection is triggered [rad]",
     )
     ap.add_argument(
@@ -255,11 +304,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--position-epsilon",
         type=float,
-        default=0.02,
+        default=POSITION_EPSILON,
         help="position tolerance for phase transitions [rad]",
     )
-    ap.add_argument("--loop-sleep", type=float, default=0.002, help="control loop sleep time [s]")
-    ap.add_argument("--print-hz", type=float, default=10.0, help="status print frequency [Hz]")
+    ap.add_argument("--loop-sleep", type=float, default=LOOP_SLEEP, help="control loop sleep time [s]")
+    ap.add_argument("--print-hz", type=float, default=PRINT_HZ, help="status print frequency [Hz]")
     ap.add_argument(
         "--start-phase",
         choices=("auto", "opening", "approaching"),
