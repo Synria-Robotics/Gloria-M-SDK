@@ -43,7 +43,7 @@ def test_mit_gripper_api_close_hides_state_machine(fake: FakeCanAdapter) -> None
     api = GloriaGripper(
         motor,
         controller,
-        loop=GripperLoopConfig(period_s=0.0, hold_s=0.0),
+        loop=GripperLoopConfig(period_s=0.0),
     )
 
     fake.queue_param_reply(
@@ -82,7 +82,7 @@ def test_mit_gripper_api_move_to_uses_user_units_and_stall_protection(fake: Fake
     api = GloriaGripper(
         motor,
         controller,
-        loop=GripperLoopConfig(period_s=0.0, hold_s=0.0),
+        loop=GripperLoopConfig(period_s=0.0),
     )
     fake.queue_param_reply(
         can_id=0x101,
@@ -180,6 +180,18 @@ def test_motor_lifecycle_api_set_zero_sends_zero_command(fake: FakeCanAdapter) -
     api.set_zero()
 
     assert any(data[7] == 0xFE for _, data in fake.sent_frames)
+
+
+def test_gloria_gripper_read_param_accepts_register_name(fake: FakeCanAdapter) -> None:
+    motor = MotorClient("unused", _transport=fake)
+    api = GloriaGripper(motor, GripperController(motor, GripperControlConfig(open_pos=2.7, close_limit=0.0)))
+    api.connect(mode=None, enable=False, apply_limits=False, refresh=False)
+    fake.queue_param_reply(can_id=0x101, rid=int(Variable.PMAX), value=3.14, is_u32=False)
+
+    value = api.read_param("PMAX", timeout_s=0.1)
+
+    assert value is not None
+    assert abs(float(value) - 3.14) < 0.001
 
 
 def test_motor_lifecycle_api_set_mode_updates_current_mode(fake: FakeCanAdapter) -> None:

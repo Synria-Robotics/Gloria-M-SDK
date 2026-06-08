@@ -50,6 +50,7 @@ Gloria-M-SDK/
 |   |-- 06_send_pv_frame.py    # Send raw PV position + velocity frame
 |   |-- 07_pv_gripper.py       # PV open/close/hold motion
 |   |-- 08_mit_gripper.py      # MIT soft-close gripper control
+|   |-- 09_read_params.py      # Read motor parameters
 |   `-- gripper_control.toml   # Single maintained gripper config
 |-- CHANGELOG.md
 |-- pyproject.toml
@@ -125,13 +126,14 @@ with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
     gripper.move_to(0)
 ```
 
-For a full automatic sequence:
+For protected gripping:
 
 ```python
 from gloria_m_sdk import GloriaGripper
 
 with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
-    gripper.grip(return_to_initial=False)
+    gripper.move_to(1000)
+    gripper.move_to(0, stall_protection=True)
 ```
 
 ### GloriaGripper methods
@@ -142,9 +144,8 @@ with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
 | `move_to(value)` | Move in user units: `1000=open`, `0=protected close` |
 | `open()` | Open gripper using MIT position control |
 | `close()` | Soft-close search; stops chasing close limit after contact |
-| `hold(duration_s=None)` | Hold at detected contact position |
+| `hold(duration_s=1.0)` | Hold at detected contact position |
 | `release()` | Open/release the gripper |
-| `grip(...)` | Convenience sequence: optional open, close, hold, optional release |
 | `check_connection()` | Read-only serial/CAN diagnostic |
 | `scan_ids(ids)` | Read-only CAN ID scan |
 | `connect(mode=..., enable=...)` | Open transport, optionally switch mode and enable |
@@ -352,6 +353,18 @@ single close command keeps holding until the user presses Ctrl+C.
 python demos/08_mit_gripper.py
 python demos/08_mit_gripper.py --force-level 4
 python demos/08_mit_gripper.py --port /dev/cu.usbmodem00000000050C1
+```
+
+### 09_read_params.py - read motor parameters
+
+Uses `GloriaGripper.read_param()` to read motor parameters by register name or
+register ID. It does not enable the motor, switch mode, write parameters, save
+flash, or move the gripper.
+
+```bash
+python demos/09_read_params.py
+python demos/09_read_params.py --param CTRL_MODE --param PMAX --param VMAX --param TMAX
+python demos/09_read_params.py --all
 ```
 
 ## License

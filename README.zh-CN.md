@@ -49,6 +49,7 @@ Gloria-M-SDK/
 |   |-- 06_send_pv_frame.py    # 发送原始 PV 位置+速度帧
 |   |-- 07_pv_gripper.py       # PV 打开/闭合/保持运动
 |   |-- 08_mit_gripper.py      # MIT 软闭合夹爪控制
+|   |-- 09_read_params.py      # 读取电机参数
 |   `-- gripper_control.toml   # 唯一维护的夹爪配置
 |-- CHANGELOG.md
 |-- pyproject.toml
@@ -122,13 +123,14 @@ with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
     gripper.move_to(0)
 ```
 
-完整夹取流程可以直接调用：
+带防堵转保护的夹取流程：
 
 ```python
 from gloria_m_sdk import GloriaGripper
 
 with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
-    gripper.grip(return_to_initial=False)
+    gripper.move_to(1000)
+    gripper.move_to(0, stall_protection=True)
 ```
 
 ### GloriaGripper 方法
@@ -139,9 +141,8 @@ with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
 | `move_to(value)` | 用户单位控制：`1000=打开`，`0=带保护闭合` |
 | `open()` | 用 MIT 位置控制打开夹爪 |
 | `close()` | 软闭合搜索；接触后不再追完全闭合位置 |
-| `hold(duration_s=None)` | 在接触位置保持 |
+| `hold(duration_s=1.0)` | 在接触位置保持 |
 | `release()` | 打开/释放夹爪 |
-| `grip(...)` | 便捷流程：可选打开、闭合、保持、可选释放 |
 | `check_connection()` | 只读串口/CAN 诊断 |
 | `scan_ids(ids)` | 只读扫描 CAN ID |
 | `connect(mode=..., enable=...)` | 打开传输，可选切模式和使能 |
@@ -326,6 +327,16 @@ python demos/07_pv_gripper.py --close-vel 0.3 --hold-s 2.0
 python demos/08_mit_gripper.py
 python demos/08_mit_gripper.py --force-level 4
 python demos/08_mit_gripper.py --port /dev/cu.usbmodem00000000050C1
+```
+
+### 09_read_params.py - 读取电机参数
+
+使用 `GloriaGripper.read_param()` 按寄存器名称或寄存器 ID 读取电机参数。不使能电机、不切模式、不写参数、不保存 Flash、不运动夹爪。
+
+```bash
+python demos/09_read_params.py
+python demos/09_read_params.py --param CTRL_MODE --param PMAX --param VMAX --param TMAX
+python demos/09_read_params.py --all
 ```
 
 ## 许可证

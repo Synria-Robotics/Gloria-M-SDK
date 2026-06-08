@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import time
 import tomllib
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from .client import MotorClient as _MotorClient
 from .exceptions import GloriaSdkError
@@ -16,6 +16,7 @@ from .gripper_control import (
     GripperController,
     MotorHealth,
 )
+from .registers import Variable
 from .types import ControlMode, Limits, PositionRange
 
 DEFAULT_GRIPPER_CONFIG = os.path.join("demos", "gripper_control.toml")
@@ -36,10 +37,6 @@ class GripperConnectionConfig:
 @dataclass(frozen=True)
 class GripperLoopConfig:
     period_s: float = 0.01
-    print_hz: float = 10.0
-    hold_s: float = 2.0
-    open_first: bool = True
-    return_to_initial: bool = True
 
 
 @dataclass(frozen=True)
@@ -320,6 +317,36 @@ class GloriaGripper:
         self._emit_motor("set_zero", snapshot)
         return snapshot
 
+    def read_param(
+        self,
+        param: int | str | Variable,
+        *,
+        timeout_s: float = 0.2,
+    ) -> int | float | None:
+        """Read one motor parameter by register name or ID.
+
+        Examples:
+            gripper.read_param("PMAX")
+            gripper.read_param(21)
+            gripper.read_param(Variable.PMAX)
+        """
+
+        return self.motor.read_param(_parse_param_ref(param), timeout_s=timeout_s)
+
+    def read_params(
+        self,
+        params: Iterable[int | str | Variable],
+        *,
+        timeout_s: float = 0.2,
+    ) -> dict[str, int | float | None]:
+        """Read several motor parameters and return a name -> value mapping."""
+
+        values: dict[str, int | float | None] = {}
+        for param in params:
+            rid = _parse_param_ref(param)
+            values[_param_label(rid)] = self.motor.read_param(rid, timeout_s=timeout_s)
+        return values
+
     def enable_for(
         self,
         duration_s: float,
@@ -572,8 +599,8 @@ class GloriaGripper:
         self.controller.begin_close()
         return self._run_until({GripperControlState.HOLDING}, phase="close")
 
-    def hold(self, duration_s: Optional[float] = None) -> GripperControlStatus:
-        end_at = time.monotonic() + (self.loop.hold_s if duration_s is None else duration_s)
+    def hold(self, duration_s: float = 1.0) -> GripperControlStatus:
+        end_at = time.monotonic() + duration_s
         status = self.status()
         while time.monotonic() < end_at and self.controller.state != GripperControlState.ERROR:
             status = self.controller.step()
@@ -607,24 +634,6 @@ class GloriaGripper:
 
         target = self._user_value_to_motor_position(value)
         return self._move_to_motor_position(target)
-
-    def grip(
-        self,
-        *,
-        open_first: Optional[bool] = None,
-        hold_s: Optional[float] = None,
-        return_to_initial: Optional[bool] = None,
-    ) -> GripperControlStatus:
-        do_open = self.loop.open_first if open_first is None else open_first
-        do_return = self.loop.return_to_initial if return_to_initial is None else return_to_initial
-
-        if do_open:
-            self.open()
-        status = self.close()
-        status = self.hold(hold_s)
-        if do_return:
-            status = self.release()
-        return status
 
     def _run_until(
         self,
@@ -704,10 +713,6 @@ def load_gripper_config(path: str | os.PathLike[str] = DEFAULT_GRIPPER_CONFIG) -
         control=GripperControlConfig(**control_raw),
         loop=GripperLoopConfig(
             period_s=float(loop.get("period_s", 0.01)),
-            print_hz=float(loop.get("print_hz", 10.0)),
-            hold_s=float(loop.get("hold_s", 2.0)),
-            open_first=bool(loop.get("open_first", True)),
-            return_to_initial=bool(loop.get("return_to_initial", loop.get("release_after_hold", True))),
         ),
     )
 
@@ -732,6 +737,29 @@ def _parse_int(value: Any) -> int:
     if isinstance(value, str):
         return int(value, 0)
     raise TypeError(f"expected int or int string, got {type(value).__name__}")
+
+
+def _parse_param_ref(param: int | str | Variable) -> int:
+    if isinstance(param, Variable):
+        return int(param)
+    if isinstance(param, int):
+        return int(param)
+    if isinstance(param, str):
+        text = param.strip()
+        if not text:
+            raise ValueError("parameter name cannot be empty")
+        for variable in Variable:
+            if variable.name.lower() == text.lower():
+                return int(variable)
+        return int(text, 0)
+    raise TypeError(f"expected int, str, or Variable, got {type(param).__name__}")
+
+
+def _param_label(rid: int) -> str:
+    try:
+        return Variable(int(rid)).name
+    except ValueError:
+        return str(int(rid))
 
 
 def _build_limits(data: dict[str, Any]) -> Limits:

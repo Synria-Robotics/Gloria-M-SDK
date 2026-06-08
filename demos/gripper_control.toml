@@ -55,8 +55,3 @@ error_kd = 0.8
 
 [loop]
 period_s = 0.01
-print_hz = 10.0
-hold_s = 2.0
-open_first = true
-# true: release/open after hold_s. false: keep holding after the demo ends.
-return_to_initial = false
