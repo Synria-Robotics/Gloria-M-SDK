@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import struct
-from typing import Tuple
+from typing import Optional, Tuple
 
 from .types import Limits
 
@@ -38,6 +38,63 @@ def unpack_f32(data4: bytes) -> float:
     return struct.unpack("<f", data4)[0]
 
 
+def pack_u32(value: int) -> bytes:
+    if not (0 <= int(value) <= 0xFFFFFFFF):
+        raise ValueError("u32 out of range")
+    return struct.pack("<I", int(value))
+
+
+def unpack_u32(data4: bytes) -> int:
+    return struct.unpack("<I", data4)[0]
+
+
+def is_u32_param(rid: int) -> bool:
+    return (7 <= int(rid) <= 10) or (13 <= int(rid) <= 16) or (35 <= int(rid) <= 36)
+
+
+def pack_control_command(cmd: int) -> bytes:
+    return bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, cmd & 0xFF])
+
+
+def pack_state_request(command_id: int) -> bytes:
+    can_id_l = int(command_id) & 0xFF
+    can_id_h = (int(command_id) >> 8) & 0xFF
+    return bytes([can_id_l, can_id_h, 0xCC, 0x00, 0x00, 0x00, 0x00, 0x00])
+
+
+def pack_param_read(command_id: int, rid: int) -> bytes:
+    can_id_l = int(command_id) & 0xFF
+    can_id_h = (int(command_id) >> 8) & 0xFF
+    return bytes([can_id_l, can_id_h, 0x33, int(rid) & 0xFF, 0, 0, 0, 0])
+
+
+def pack_param_write_f32(command_id: int, rid: int, value: float) -> bytes:
+    can_id_l = int(command_id) & 0xFF
+    can_id_h = (int(command_id) >> 8) & 0xFF
+    return bytes([can_id_l, can_id_h, 0x55, int(rid) & 0xFF]) + pack_f32(value)
+
+
+def pack_param_write_u32(command_id: int, rid: int, value: int) -> bytes:
+    can_id_l = int(command_id) & 0xFF
+    can_id_h = (int(command_id) >> 8) & 0xFF
+    return bytes([can_id_l, can_id_h, 0x55, int(rid) & 0xFF]) + pack_u32(value)
+
+
+def pack_param_save(command_id: int) -> bytes:
+    can_id_l = int(command_id) & 0xFF
+    can_id_h = (int(command_id) >> 8) & 0xFF
+    return bytes([can_id_l, can_id_h, 0xAA, 0x00, 0, 0, 0, 0])
+
+
+def parse_param_reply(data8: bytes) -> Optional[Tuple[int, int | float]]:
+    if len(data8) != 8 or data8[2] not in (0x33, 0x55):
+        return None
+    rid = int(data8[3])
+    if is_u32_param(rid):
+        return rid, unpack_u32(data8[4:8])
+    return rid, unpack_f32(data8[4:8])
+
+
 def pack_mit_command(
     *,
     kp: float,
@@ -47,14 +104,6 @@ def pack_mit_command(
     tau: float,
     limits: Limits,
 ) -> bytes:
-    """
-    Pack an MIT control frame into 8 bytes:
-    - q:   16 bit
-    - dq:  12 bit
-    - kp:  12 bit (0..500)
-    - kd:  12 bit (0..5)
-    - tau: 12 bit
-    """
     kp_uint = float_to_uint(kp, 0.0, 500.0, 12)
     kd_uint = float_to_uint(kd, 0.0, 5.0, 12)
 
@@ -73,6 +122,10 @@ def pack_mit_command(
     return bytes([b0, b1, b2, b3, b4, b5, b6, b7])
 
 
+def pack_pos_vel_command(position: float, velocity: float) -> bytes:
+    return pack_f32(position) + pack_f32(velocity)
+
+
 @dataclass(frozen=True)
 class MitFeedback:
     position: float
@@ -81,12 +134,6 @@ class MitFeedback:
 
 
 def unpack_mit_feedback(data8: bytes, *, limits: Limits) -> MitFeedback:
-    """
-    Unpack an MIT feedback frame:
-    - q_uint:   data[1:3]
-    - dq_uint:  data[3] | high-4-bit(data[4])
-    - tau_uint: low-4-bit(data[4]) | data[5]
-    """
     if len(data8) != 8:
         raise ValueError("MIT feedback must be exactly 8 bytes")
     q_uint = (data8[1] << 8) | data8[2]
@@ -97,4 +144,3 @@ def unpack_mit_feedback(data8: bytes, *, limits: Limits) -> MitFeedback:
     dq = uint_to_float(dq_uint, -limits.vmax, limits.vmax, 12)
     tau = uint_to_float(tau_uint, -limits.tmax, limits.tmax, 12)
     return MitFeedback(position=q, velocity=dq, torque=tau)
-

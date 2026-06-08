@@ -1,108 +1,39 @@
 from __future__ import annotations
 
-"""
-GloriaGripper — facade entry point for the Gloria-M gripper SDK.
-
-Architecture (mirrors the Electronic-Skin-ML tactile SDK pattern):
-
-    User code
-        │
-        ▼
-    ┌─────────────────────────────────────┐
-    │  Facade   GloriaGripper            │  client.py
-    │  .motor / .motion / .params        │
-    └────────────────┬────────────────────┘
-                     │
-                     ▼
-    ┌─────────────────────────────────────┐
-    │  API layer  MotorAPI / MotionAPI   │  api/
-    │             ParamAPI               │
-    └────────────────┬────────────────────┘
-                     │
-                     ▼
-    ┌─────────────────────────────────────┐
-    │  Controller  CanController          │  controller.py
-    │  (command dispatch, feedback parse) │
-    └────────────────┬────────────────────┘
-                     │
-                     ▼
-    ┌─────────────────────────────────────┐
-    │  Protocol   protocol_mit.py         │
-    │  MIT bit-packing, float32 codec     │
-    └────────────────┬────────────────────┘
-                     │
-                     ▼
-    ┌─────────────────────────────────────┐
-    │  Transport  SerialCanAdapter        │  serial_can_adapter.py
-    │  serial framing, raw TX/RX          │
-    └─────────────────────────────────────┘
-
-    Cross-cutting (any layer may import):
-      exceptions.py  — GloriaSdkError hierarchy
-      types.py       — Limits, ControlMode, PositionRange
-      actuator.py    — Actuator, ActuatorState
-      registers.py   — Variable (RID enum)
-      gripper_baseline.py — TorqueBaseline
-"""
-
+import logging
+import time
 from typing import Optional
 
-from .actuator import Actuator, ActuatorState
-from .api import MotorAPI, MotionAPI, ParamAPI
-from .controller import CanController
-from .gripper_baseline import TorqueBaseline
-from .serial_can_adapter import SerialCanAdapter
-from .types import ControlMode, Limits, PositionRange  # noqa: F401 — re-exported for users
+from .exceptions import GloriaConnectionError, GloriaModeError
+from .protocol import (
+    pack_control_command,
+    pack_mit_command,
+    pack_param_read,
+    pack_param_save,
+    pack_param_write_f32,
+    pack_param_write_u32,
+    pack_pos_vel_command,
+    pack_state_request,
+    parse_param_reply,
+    unpack_mit_feedback,
+)
+from .registers import Variable
+from .serial_can_adapter import CanPacket, SerialCanAdapter
+from .types import ActuatorState, ControlMode, Limits, PositionRange
 
-import logging
 _log = logging.getLogger(__name__)
 
+_BROADCAST_ID = 0x7FF
 _DEFAULT_LIMITS = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
 
-class GloriaGripper:
-    """Facade entry point for the Gloria-M gripper SDK.
+class MotorClient:
+    """Internal motor-level client for the Gloria-M gripper.
 
-    All motor interaction goes through three domain sub-APIs:
-
-    - :attr:`motor`  — enable / disable / set_zero / set_mode / poll
-    - :attr:`motion` — send_mit / send_pos_vel
-    - :attr:`params` — read / write_f32 / write_u32 / save / apply_limits
-
-    The current actuator state is available via :attr:`state`.
-
-    Quick start::
-
-        from gloria_m_sdk import GloriaGripper, ControlMode
-
-        with GloriaGripper("COM5") as g:
-            g.motor.set_mode(ControlMode.POS_VEL)
-            g.motor.enable()
-            g.motor.refresh()
-            print(g.state.position)
-
-            g.motion.send_pos_vel(position=2.5, velocity=1.0)
-
-    Parameters
-    ----------
-    port:
-        Serial port name, e.g. ``"COM5"`` or ``"/dev/ttyUSB0"``.
-    baudrate:
-        Serial baud rate (default 921 600).
-    command_id:
-        CAN ID for commands sent to the motor (default ``0x01``).
-    feedback_id:
-        CAN ID of feedback frames from the motor (default ``0x101``).
-    limits:
-        MIT scaling limits (PMAX / VMAX / TMAX).  Defaults to
-        ``Limits(pmax=3.14, vmax=10.0, tmax=12.0)``.
-    safe_position:
-        Optional position clamp applied to every command.
-    baseline_csv:
-        Path to a no-load torque baseline CSV.  When provided the baseline is
-        loaded at construction time and available as :attr:`baseline`.
-    timeout:
-        Serial read timeout in seconds (default 0.5).
+    The class owns connection management, motor lifecycle commands, motion
+    commands, parameter read/write, and state caching. Protocol byte packing is
+    delegated to :mod:`gloria_m_sdk.protocol`; serial framing is delegated to
+    :class:`gloria_m_sdk.serial_can_adapter.SerialCanAdapter`.
     """
 
     def __init__(
@@ -114,63 +45,33 @@ class GloriaGripper:
         feedback_id: int = 0x101,
         limits: Optional[Limits] = None,
         safe_position: Optional[PositionRange] = None,
-        baseline_csv: Optional[str] = None,
         timeout: float = 0.5,
         _transport: Optional[object] = None,
     ) -> None:
         self._port = port
         self._baudrate = baudrate
         self._timeout = timeout
+        self._command_id = int(command_id)
+        self._feedback_id = int(feedback_id)
         self._limits = limits if limits is not None else _DEFAULT_LIMITS
-        self._transport_override = _transport  # testing hook — not part of public API
-
-        self._act = Actuator(
-            name="gripper",
-            command_id=command_id,
-            feedback_id=feedback_id,
-            limits=self._limits,
-            safe_position=safe_position,
-        )
+        self._safe_position = safe_position
+        self._transport_override = _transport
 
         self._adapter: Optional[object] = None
-        self._ctrl: Optional[CanController] = None
-
-        # Optional torque baseline
-        self.baseline: Optional[TorqueBaseline] = None
-        if baseline_csv:
-            self.baseline = TorqueBaseline.from_csv(baseline_csv)
-
-        # Domain API objects — usable after connect()
-        self.motor = MotorAPI(self)
-        self.motion = MotionAPI(self)
-        self.params = ParamAPI(self)
+        self._state = ActuatorState()
+        self._params: dict[int, int | float] = {}
 
     # ------------------------------------------------------------------
     # Connection management
 
     def connect(self, *, apply_limits: bool = True) -> None:
-        """Open the serial port and prepare the motor.
-
-        Parameters
-        ----------
-        apply_limits:
-            When True (default) write PMAX / VMAX / TMAX to the motor and
-            save to flash immediately after connecting.
-
-        Raises
-        ------
-        GloriaConnectionError
-            If the serial port cannot be opened.
-        """
         import serial as _serial
 
-        from .exceptions import GloriaConnectionError
-
         if self._adapter is not None:
-            return  # already connected
+            return
 
         if self._transport_override is not None:
-            _log.debug("Using injected transport (hardware-free / test mode)")
+            _log.debug("Using injected CAN transport")
             self._adapter = self._transport_override
         else:
             _log.info("Opening serial port %r at %d baud", self._port, self._baudrate)
@@ -184,92 +85,44 @@ class GloriaGripper:
                     f"Cannot open port {self._port!r}: {exc}"
                 ) from exc
 
-        self._ctrl = CanController(self._adapter)
-        self._ctrl.register(self._act)
-
         if apply_limits:
-            _log.info("Applying limits: pmax=%.3f vmax=%.3f tmax=%.3f",
-                      self._limits.pmax, self._limits.vmax, self._limits.tmax)
-            self._ctrl.apply_limits_and_save(self._act, self._limits)
+            self.apply_limits(self._limits)
 
-        _log.info("GloriaGripper connected (port=%r, cmd_id=0x%03X, fb_id=0x%03X)",
-                  self._port, self._act.command_id, self._act.feedback_id)
+        _log.info(
+            "MotorClient connected (port=%r, cmd_id=0x%03X, fb_id=0x%03X)",
+            self._port,
+            self._command_id,
+            self._feedback_id,
+        )
 
     def disconnect(self) -> None:
-        """Close the serial port and release all resources.
-
-        After this call :attr:`is_connected` returns ``False`` and all
-        sub-API method calls will raise
-        :class:`~gloria_m_sdk.exceptions.GloriaConnectionError`.
-
-        .. note::
-            ``disconnect()`` does **not** send a disable command to the motor.
-            If the motor is currently energized, it will continue to hold its
-            last commanded position until the firmware watchdog times out and
-            cuts power.  For a clean shutdown, always call
-            ``gripper.motor.disable()`` before disconnecting.
-        """
         if self._adapter is not None:
-            _log.info("Disconnecting GloriaGripper (port=%r)", self._port)
+            _log.info("Disconnecting MotorClient (port=%r)", self._port)
             if hasattr(self._adapter, "close"):
                 self._adapter.close()  # type: ignore[union-attr]
             self._adapter = None
-        self._ctrl = None
 
     @property
     def is_connected(self) -> bool:
-        """``True`` if the serial port is currently open and ready.
+        return bool(self._adapter is not None and self._adapter.is_open)
 
-        This checks the underlying serial port's ``is_open`` flag.  It does
-        **not** send a ping to the motor — a ``True`` return only means the
-        host-side port is open, not that the motor is alive on the bus.
-
-        Use :meth:`motor.refresh` to confirm the motor is responding.
-        """
-        return (
-            self._adapter is not None
-            and self._adapter.is_open
-        )
-
-    def __enter__(self) -> "GloriaGripper":
-        """Connect on entry; used with the ``with`` statement."""
+    def __enter__(self) -> "MotorClient":
         self.connect()
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        """Disconnect on exit (even if an exception was raised).
-
-        For a clean shutdown, disable the motor before the ``with`` block exits::
-
-            with GloriaGripper("COM5") as g:
-                g.motor.enable()
-                try:
-                    g.motion.send_pos_vel(position=2.5, velocity=1.0)
-                finally:
-                    g.motor.disable()  # de-energize before disconnect
-        """
         self.disconnect()
 
     # ------------------------------------------------------------------
-    # State shortcut
+    # State and mode
+
+    @property
+    def state(self) -> ActuatorState:
+        return self._state
 
     @property
     def current_mode(self) -> Optional[ControlMode]:
-        """Control mode last confirmed by the motor, or ``None`` if not set.
-
-        This reflects the mode echoed back by the motor after a successful
-        :meth:`motor.set_mode` call.  It returns ``None`` before any mode has
-        been confirmed.
-
-        Use this to inspect the active mode without sending any CAN traffic::
-
-            print(g.current_mode)           # ControlMode.POS_VEL or None
-            assert g.current_mode == ControlMode.MIT
-        """
-        from .registers import Variable
-
-        rid = int(Variable.CTRL_MODE)
-        cached = self._act.params.get(rid)
+        cached = self._params.get(int(Variable.CTRL_MODE))
         if cached is None:
             return None
         try:
@@ -277,27 +130,180 @@ class GloriaGripper:
         except ValueError:
             return None
 
-    @property
-    def state(self) -> ActuatorState:
-        """Latest actuator state snapshot (position, velocity, torque).
+    # ------------------------------------------------------------------
+    # Motor lifecycle
 
-        Fields
-        ------
-        position : float
-            Motor shaft angle [rad], relative to the zero set by
-            :meth:`motor.set_zero`.
-        velocity : float
-            Motor shaft angular velocity [rad/s].
-        torque : float
-            Estimated motor output torque [N·m].
+    def enable(self) -> None:
+        _log.info("Enabling gripper (cmd_id=0x%03X)", self._command_id)
+        self._send(self._command_id, pack_control_command(0xFC))
+        time.sleep(0.1)
+        self.poll()
 
-        The state is updated whenever a feedback frame is parsed.  This
-        happens automatically after any command sent with ``poll=True``
-        (the default), or explicitly by calling :meth:`motor.refresh` or
-        :meth:`motor.poll`.
+    def disable(self) -> None:
+        _log.info("Disabling gripper (cmd_id=0x%03X)", self._command_id)
+        self._send(self._command_id, pack_control_command(0xFD))
+        time.sleep(0.01)
 
-        The returned :class:`~gloria_m_sdk.actuator.ActuatorState` is a
-        snapshot; successive reads may return different values if a new
-        feedback packet has arrived in the meantime.
-        """
-        return self._act.state
+    def set_zero(self) -> None:
+        _log.warning("set_zero called; this permanently resets the angle origin")
+        self._send(self._command_id, pack_control_command(0xFE))
+        time.sleep(0.1)
+        self.poll()
+
+    def set_mode(
+        self,
+        mode: ControlMode,
+        *,
+        retries: int = 10,
+        retry_s: float = 0.05,
+    ) -> None:
+        rid = int(Variable.CTRL_MODE)
+        self._params.pop(rid, None)
+        self.write_param_u32(rid, int(mode))
+
+        deadline = time.time() + retries * retry_s
+        while time.time() < deadline:
+            time.sleep(retry_s)
+            self.poll()
+            if rid in self._params and int(self._params[rid]) == int(mode):
+                _log.info("Control mode confirmed: %s", mode.name)
+                return
+
+        raise GloriaModeError(
+            f"Motor did not confirm mode switch to {mode.name}. "
+            "Check CAN wiring and motor power."
+        )
+
+    def refresh(self) -> None:
+        self._send(_BROADCAST_ID, pack_state_request(self._command_id))
+        self.poll()
+
+    def poll(self) -> None:
+        adapter = self._require_connected()
+        for pkt in adapter.read_packets():
+            self._handle_packet(pkt)
+
+    # ------------------------------------------------------------------
+    # Motion commands
+
+    def send_mit(
+        self,
+        *,
+        kp: float,
+        kd: float,
+        q: float,
+        dq: float,
+        tau: float,
+        poll: bool = True,
+    ) -> None:
+        self._require_mode(ControlMode.MIT)
+        payload = pack_mit_command(
+            kp=kp,
+            kd=kd,
+            q=self._clamp_position(q),
+            dq=dq,
+            tau=tau,
+            limits=self._limits,
+        )
+        self._send(self._command_id, payload)
+        if poll:
+            self.poll()
+
+    def send_pos_vel(self, *, position: float, velocity: float, poll: bool = True) -> None:
+        self._require_mode(ControlMode.POS_VEL)
+        can_id = 0x100 + (self._command_id & 0x7FF)
+        payload = pack_pos_vel_command(self._clamp_position(position), velocity)
+        self._send(can_id, payload)
+        if poll:
+            self.poll()
+
+    # ------------------------------------------------------------------
+    # Parameters
+
+    def read_param(self, rid: int | Variable, *, timeout_s: float = 0.05) -> Optional[int | float]:
+        rid_int = int(rid)
+        self._params.pop(rid_int, None)
+        self._send(_BROADCAST_ID, pack_param_read(self._command_id, rid_int))
+
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            self.poll()
+            if rid_int in self._params:
+                return self._params[rid_int]
+            time.sleep(0.002)
+
+        _log.warning(
+            "read_param timed out (rid=%d, timeout=%.3fs); check CAN wiring and motor power",
+            rid_int,
+            timeout_s,
+        )
+        return None
+
+    def write_param_f32(self, rid: int | Variable, value: float) -> None:
+        self._send(_BROADCAST_ID, pack_param_write_f32(self._command_id, int(rid), value))
+
+    def write_param_u32(self, rid: int | Variable, value: int) -> None:
+        self._send(_BROADCAST_ID, pack_param_write_u32(self._command_id, int(rid), value))
+
+    def save_params(self) -> None:
+        self._send(_BROADCAST_ID, pack_param_save(self._command_id))
+
+    def apply_limits(self, limits: Limits) -> None:
+        self._limits = limits
+        self.write_param_f32(Variable.PMAX, limits.pmax)
+        self.write_param_f32(Variable.VMAX, limits.vmax)
+        self.write_param_f32(Variable.TMAX, limits.tmax)
+        self.save_params()
+
+    # ------------------------------------------------------------------
+    # Internals
+
+    def _require_connected(self):
+        if self._adapter is None:
+            raise GloriaConnectionError("Not connected. Call MotorClient.connect() first.")
+        return self._adapter
+
+    def _require_mode(self, expected: ControlMode) -> None:
+        actual = self.current_mode
+        if actual is None:
+            raise GloriaModeError(
+                f"No control mode has been confirmed yet. "
+                f"Call gripper.set_mode(ControlMode.{expected.name}) before sending motion commands."
+            )
+        if actual != expected:
+            raise GloriaModeError(
+                f"Wrong control mode: motor is in {actual.name}, but this command "
+                f"requires {expected.name}. Call gripper.set_mode(ControlMode.{expected.name}) first."
+            )
+
+    def _send(self, can_id: int, data8: bytes) -> None:
+        self._require_connected().send(can_id, data8)
+
+    def _clamp_position(self, value: float) -> float:
+        if self._safe_position is None:
+            return float(value)
+        return self._safe_position.clamp(float(value))
+
+    def _handle_packet(self, pkt: CanPacket) -> None:
+        if pkt.cmd != 0x11:
+            return
+
+        param = parse_param_reply(pkt.data)
+        if param is not None:
+            rid, value = param
+            if self._packet_matches_gripper(pkt):
+                self._params[int(rid)] = value
+            return
+
+        if not self._packet_matches_gripper(pkt):
+            return
+
+        fb = unpack_mit_feedback(pkt.data, limits=self._limits)
+        self._state.update(position=fb.position, velocity=fb.velocity, torque=fb.torque)
+
+    def _packet_matches_gripper(self, pkt: CanPacket) -> bool:
+        if pkt.can_id in (self._command_id, self._feedback_id):
+            return True
+        if pkt.can_id == 0x00 and len(pkt.data) == 8:
+            return (pkt.data[0] & 0x0F) == (self._command_id & 0x0F)
+        return False

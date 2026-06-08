@@ -14,24 +14,24 @@ FakeCanAdapter
 --------------
 An in-memory drop-in replacement for ``SerialCanAdapter`` used for testing
 without physical hardware.  It records every outgoing frame and lets tests
-inject pre-built packets that the controller will "receive"::
+inject pre-built packets that the gripper will receive::
 
     from gloria_m_sdk.transport import FakeCanAdapter
-    from gloria_m_sdk import GloriaGripper, ControlMode
+    from gloria_m_sdk.client import MotorClient
 
     fake = FakeCanAdapter()
-    # Tell the fake adapter what to answer when the controller polls:
+    # Tell the fake adapter what to answer when the gripper polls:
     fake.queue_mit_feedback(can_id=0x101, position=1.57, velocity=0.0, torque=0.0)
 
-    with GloriaGripper("unused", _transport=fake) as g:
-        g.motor.refresh()
+    with MotorClient("unused", _transport=fake) as g:
+        g.refresh()
         assert abs(g.state.position - 1.57) < 0.01
 
-Using FakeCanAdapter in GloriaGripper
---------------------------------------
+Using FakeCanAdapter in MotorClient
+-----------------------------------
 Pass it via the private ``_transport`` constructor argument::
 
-    g = GloriaGripper("unused", _transport=FakeCanAdapter())
+    g = MotorClient("unused", _transport=FakeCanAdapter())
     g.connect(apply_limits=False)
     # ... test without hardware ...
 
@@ -53,7 +53,7 @@ class ICanTransport(Protocol):
     """Structural interface for CAN transport backends.
 
     Any object that implements these five members can be used as the
-    transport layer for :class:`~gloria_m_sdk.controller.CanController`.
+    transport layer for :class:`~gloria_m_sdk.client.MotorClient`.
     This enables dependency injection and hardware-free unit testing.
 
     Built-in implementations:
@@ -102,14 +102,15 @@ class FakeCanAdapter:
     Quick-start example::
 
         from gloria_m_sdk.transport import FakeCanAdapter
-        from gloria_m_sdk import GloriaGripper, ControlMode, Limits
+        from gloria_m_sdk.client import MotorClient
+        from gloria_m_sdk import ControlMode
 
         fake = FakeCanAdapter()
         # Simulate the motor echoing back CTRL_MODE = 2 (POS_VEL)
         fake.queue_param_reply(can_id=0x101, rid=10, value=2, is_u32=True)
 
-        with GloriaGripper("unused", _transport=fake) as g:
-            g.motor.set_mode(ControlMode.POS_VEL)
+        with MotorClient("unused", _transport=fake) as g:
+            g.set_mode(ControlMode.POS_VEL)
             # No physical port opened — works entirely in memory.
 
     Attributes
@@ -183,7 +184,7 @@ class FakeCanAdapter:
         The values are bit-packed using the same MIT layout the real motor
         firmware produces.  The resulting
         :class:`~gloria_m_sdk.serial_can_adapter.CanPacket` (``cmd=0x11``)
-        will be processed by :meth:`~gloria_m_sdk.controller.CanController.poll`
+        will be processed by :meth:`~gloria_m_sdk.client.MotorClient.poll`
         and update the actuator state.
 
         Parameters
@@ -201,7 +202,7 @@ class FakeCanAdapter:
             MIT scaling limits; defaults to ``Limits(3.14, 10.0, 12.0)``.
         """
         from .types import Limits as _Limits
-        from .protocol_mit import float_to_uint
+        from .protocol import float_to_uint
 
         lim = limits if limits is not None else _Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
@@ -209,7 +210,7 @@ class FakeCanAdapter:
         dq_uint = float_to_uint(velocity, -lim.vmax, lim.vmax, 12)
         tau_uint = float_to_uint(torque, -lim.tmax, lim.tmax, 12)
 
-        # MIT feedback layout (see unpack_mit_feedback in protocol_mit.py):
+        # MIT feedback layout (see unpack_mit_feedback in protocol.py):
         #   data[0]: motor ID byte (low byte of can_id)
         #   data[1]: q bits [15:8]
         #   data[2]: q bits [7:0]
@@ -240,8 +241,7 @@ class FakeCanAdapter:
         """Enqueue a parameter read/write echo reply.
 
         Simulates the motor echoing back a register value after a read or
-        write command.  Used to test :meth:`~gloria_m_sdk.api.param_api.ParamAPI.read`
-        and :meth:`~gloria_m_sdk.api.motor_api.MotorAPI.set_mode`.
+        write command. Used to test parameter reads and mode switching.
 
         Parameters
         ----------

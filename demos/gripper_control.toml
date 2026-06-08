@@ -1,0 +1,62 @@
+[connection]
+# Use "auto" to select the most likely USB-CAN serial port.
+# You can also set an explicit port, e.g. "/dev/cu.usbmodem00000000050C1".
+port = "auto"
+baudrate = 921600
+command_id = "0x01"
+feedback_id = "0x101"
+timeout = 0.5
+
+[limits]
+pmax = 3.14
+vmax = 10.0
+tmax = 12.0
+
+[control]
+# Mechanical travel. Closing direction is inferred from open_pos -> close_limit.
+open_pos = 2.7
+close_limit = 0.0
+
+# Opening/releasing: target is reachable, so normal MIT position control is OK.
+open_kp = 80.0
+open_kd = 1.0
+open_tau_ff = 0.0
+open_position_tolerance = 0.03
+open_velocity_tolerance = 0.05
+open_timeout_s = 5.0
+release_timeout_s = 5.0
+
+# Closing search: soft close. Do not chase close_limit with high stiffness.
+search_kp = 0.0
+search_kd = 0.8
+search_tau_ff = -0.35
+close_speed = 0.35
+search_step = 0.03
+close_limit_tolerance = 0.02
+close_timeout_s = 8.0
+
+# Contact detection: low velocity + raised torque, sustained for a short time.
+contact_velocity_threshold = 0.08
+contact_torque_threshold = 0.50
+contact_confirm_s = 0.10
+
+# Holding: target is contact_pos, not close_limit.
+hold_kp = 8.0
+hold_kd = 0.6
+hold_tau_ff = -0.2
+
+# Safety thresholds. Omit current/temperature if your backend cannot read them.
+max_abs_torque = 5.0
+stall_velocity_threshold = 0.03
+stall_torque_threshold = 1.5
+stall_timeout_s = 0.3
+position_margin = 0.1
+error_kd = 0.8
+
+[loop]
+period_s = 0.01
+print_hz = 10.0
+hold_s = 2.0
+open_first = true
+# true: release/open after hold_s. false: keep holding after the demo ends.
+return_to_initial = false

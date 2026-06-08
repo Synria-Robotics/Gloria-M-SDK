@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
+import time
 
 
 class ControlMode(IntEnum):
@@ -36,3 +37,16 @@ class PositionRange:
             return self.max
         return value
 
+
+@dataclass
+class ActuatorState:
+    position: float = 0.0
+    velocity: float = 0.0
+    torque: float = 0.0
+    updated_at: float = 0.0
+
+    def update(self, *, position: float, velocity: float, torque: float) -> None:
+        self.position = float(position)
+        self.velocity = float(velocity)
+        self.torque = float(torque)
+        self.updated_at = time.time()

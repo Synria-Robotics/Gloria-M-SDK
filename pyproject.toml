@@ -12,9 +12,6 @@ authors = [{name = "Synria Robotics Team", email = "contact@synriarobotics.ai"}]
 requires-python = ">=3.11"
 dependencies = ["pyserial>=3.5"]
 keywords = ["robotics", "gripper", "actuator", "CAN", "MIT", "motor", "serial"]
-
-[project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -30,6 +27,9 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov"]
+
 [project.urls]
 Homepage = "https://synriarobotics.ai"
 Repository = "https://github.com/Synria-Robotics/Gloria-M-SDK"
@@ -40,4 +40,3 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

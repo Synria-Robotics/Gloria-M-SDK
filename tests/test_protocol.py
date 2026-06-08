@@ -1,14 +1,13 @@
 """
-Unit tests for protocol_mit.py — pure bit-packing / unpacking logic.
+Unit tests for protocol.py — pure bit-packing / unpacking logic.
 
 No hardware required.  All tests run in < 1 ms each.
 """
 from __future__ import annotations
 
-import math
 import pytest
 
-from gloria_m_sdk.protocol_mit import (
+from gloria_m_sdk.protocol import (
     float_to_uint,
     pack_f32,
     pack_mit_command,
@@ -95,7 +94,7 @@ class TestMitRoundTrip:
         payload = pack_mit_command(kp=0.0, kd=0.0, q=q, dq=dq, tau=tau, limits=_LIMITS)
         # Feedback layout differs from command layout in the first byte (motor ID),
         # so we reconstruct the feedback bytes manually.
-        from gloria_m_sdk.protocol_mit import float_to_uint, uint_to_float
+        from gloria_m_sdk.protocol import float_to_uint, uint_to_float
 
         q_uint  = float_to_uint(q,   -_LIMITS.pmax, _LIMITS.pmax, 16)
         dq_uint = float_to_uint(dq,  -_LIMITS.vmax, _LIMITS.vmax, 12)

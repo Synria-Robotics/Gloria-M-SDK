@@ -9,8 +9,8 @@ class GloriaSdkError(Exception):
         from gloria_m_sdk import GloriaGripper, GloriaSdkError
 
         try:
-            with GloriaGripper("COM5") as g:
-                g.motor.enable()
+            with GloriaGripper.from_config("demos/gripper_control.toml") as g:
+                g.move_to(1000)
         except GloriaSdkError as e:
             print(f"SDK error: {e}")
 
@@ -48,9 +48,8 @@ class GloriaCommunicationError(GloriaSdkError):
     - Baud rate mismatch between adapter and motor firmware.
     - Serial buffer overflow due to an overly tight control loop.
 
-    This exception is currently reserved for future use; the controller layer
-    returns ``None`` or ``False`` on timeout rather than raising.  Catching it
-    is still recommended for forward compatibility.
+    This exception is currently reserved for future use. Catching it is still
+    recommended for forward compatibility.
     """
 
 
@@ -59,7 +58,7 @@ class GloriaConfigError(GloriaSdkError):
 
     Common causes:
     - ``Limits.pmax`` / ``vmax`` / ``tmax`` exceed the hardware specification.
-    - A register ID passed to ``ParamAPI.read`` or ``write_f32`` does not exist.
+    - A register ID passed to ``read_param`` or ``write_param_f32`` does not exist.
 
     Check the :class:`~gloria_m_sdk.registers.Variable` enum for the list of
     valid register IDs.
@@ -69,8 +68,8 @@ class GloriaConfigError(GloriaSdkError):
 class GloriaModeError(GloriaSdkError):
     """Raised when the motor does not confirm a control-mode switch.
 
-    Raised by :meth:`~gloria_m_sdk.api.motor_api.MotorAPI.set_mode` when the
-    motor fails to echo back the expected mode within the retry window.
+    Raised by :meth:`~gloria_m_sdk.client.MotorClient.set_mode` when the motor
+    fails to echo back the expected mode within the retry window.
 
     Common causes:
     - Motor is not yet powered or still booting.

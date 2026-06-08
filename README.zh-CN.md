@@ -13,7 +13,8 @@
 - 通过串口转 CAN 适配器与 Gloria-M 系列电机通信
 - 支持 **MIT 模式**（kp/kd/扭矩前馈控制）和 **PV 模式**（位置 + 速度控制）
 - 提供参数读写、电机使能和失能等基础控制能力
-- 内置 MIT 协议打包/解包，以及反馈状态解析- **传输层抽象**（`ICanTransport`）— 替换串口后端无需修改任何其他代码
+- 内置 MIT 协议打包/解包，以及反馈状态解析
+- **传输层抽象**（`ICanTransport`）— 替换串口后端无需修改任何其他代码
 - **`FakeCanAdapter`** — 纯内存实现，无需硬件即可运行全量单元测试
 - **结构化日志**（`logging`）— 连接、模式切换、参数读取超时均会输出日志记录
 ## 项目结构
@@ -22,35 +23,33 @@
 Gloria-M-SDK/
 |-- src/gloria_m_sdk/       # SDK 核心库
 |   |-- __init__.py         # 包入口，导出公开 API
-|   |-- client.py           # 门面层：GloriaGripper（推荐入口）
+|   |-- gripper_api.py      # 公开 API：GloriaGripper
+|   |-- client.py           # 内部电机客户端
+|   |-- gripper_control.py  # MIT 夹爪状态机：软闭合、接触检测、防堵转
+|   |-- protocol.py         # 达妙协议打包/解析
+|   |-- serial_can_adapter.py  # 串口转 CAN 传输层
 |   |-- exceptions.py       # 异常体系（GloriaSdkError 及子类）
 |   |-- transport.py        # ICanTransport 协议 + FakeCanAdapter（测试捆）
-|   |-- api/                # API 层：按领域拆分的子 API
-|   |   |-- __init__.py
-|   |   |-- base.py         # BaseAPI（共享控制器访问）
-|   |   |-- motor_api.py    # MotorAPI：使能/失能/模式/归零/读取
-|   |   |-- motion_api.py   # MotionAPI：send_mit / send_pos_vel
-|   |   `-- param_api.py    # ParamAPI：读写寄存器、保存、应用限制
-|   |-- actuator.py         # Actuator 和 ActuatorState 数据模型
-|   |-- controller.py       # CanController（命令下发、反馈解析）
-|   |-- protocol_mit.py     # MIT 协议打包/解包
-|   |-- serial_can_adapter.py  # 串口转 CAN 传输层
-|   |-- param_config.py     # 遗留辅助函数（建议改用 ctrl.apply_limits_and_save）
 |   |-- registers.py        # 寄存器定义（Variable 枚举）
 |   |-- types.py            # 数据类型（Limits、ControlMode 等）
-|   |-- constants.py        # 常量定义
-|   `-- gripper_baseline.py # 夹爪扭矩基线
+|   `-- constants.py        # 常量定义
 |-- tests/                  # Pytest 测试套件（无需硬件）
 |   |-- conftest.py         # 公共 fixture（FakeCanAdapter 支撑的 gripper）
-|   |-- test_protocol_mit.py# MIT 位打包 round-trip 测试
-|   |-- test_baseline.py    # TorqueBaseline 加载与插分测试
-|   \-- test_client.py      # GloriaGripper 门面集成测试
+|   |-- test_gripper_api.py # 公开 GloriaGripper API 测试
+|   |-- test_gripper_control.py # 夹爪状态机测试
+|   |-- test_protocol.py    # 协议打包/解析测试
+|   \-- test_client.py      # 内部电机客户端测试
 |-- demos/                  # 示例脚本
-|   |-- 01_gripper_quicktest.py  # PV 模式往复运动测试
-|   |-- 02_pv_control.py        # PV 模式柔顺闭合
-|   |-- 03_mit_linkage_force_control.py  # MIT 连杆夹爪力控
-|   |-- mit_close_baseline.py   # MIT 空载闭合基线采集
-|   `-- baseline/               # 基线数据 CSV 输出目录
+|   |-- 00_check_connection.py # 只读检查配置/串口/CAN
+|   |-- 01_enable_disable.py   # 使能/失能生命周期检查
+|   |-- 02_read_state.py       # 读取当前位置/速度/力矩
+|   |-- 03_set_zero.py         # 将当前位置设置为电机零点
+|   |-- 04_switch_mode.py      # 切换 MIT/PV 控制模式
+|   |-- 05_send_mit_frame.py   # 发送原始 MIT 控制帧
+|   |-- 06_send_pv_frame.py    # 发送原始 PV 位置+速度帧
+|   |-- 07_pv_gripper.py       # PV 打开/闭合/保持运动
+|   |-- 08_mit_gripper.py      # MIT 软闭合夹爪控制
+|   `-- gripper_control.toml   # 唯一维护的夹爪配置
 |-- CHANGELOG.md
 |-- pyproject.toml
 |-- requirements.txt
@@ -84,34 +83,21 @@ pip install -e ".[dev]"
 
 ## SDK 分层设计
 
-SDK 采用严格五层架构。上位机应用仅需与最上面两层（门面层和 API 层）交互。
+SDK 只暴露一个用户 API：`GloriaGripper`。夹爪运动、诊断、使能/失能、切模式、原始 MIT/PV 帧和 PV 运动都从这个对象调用；协议封包和串口/CAN 传输留在内部。
 
 ```
 用户代码
     │
     ▼
 ┌───────────────────────────────────────┐
-│  门面层   GloriaGripper  (client.py)   │  ← 推荐入口
-│  .motor / .motion / .params             │
-│  .state / .current_mode / .is_connected │
+│  API  GloriaGripper                    │
+│  move / grip / 诊断 / MIT / PV          │
 └─────────────────┬─────────────────────┘
                   │
                   ▼
 ┌───────────────────────────────────────┐
-│  API 层   MotorAPI / MotionAPI          │  api/
-│           ParamAPI                       │
-└─────────────────┬─────────────────────┘
-                  │
-                  ▼
-┌───────────────────────────────────────┐
-│  控制层   CanController                │  controller.py
-│  命令下发 · 反馈解析                    │
-└─────────────────┬─────────────────────┘
-                  │
-                  ▼
-┌───────────────────────────────────────┐
-│  协议层   protocol_mit.py              │
-│  MIT 位打包 · float32 编解码            │
+│  协议层   protocol.py                  │
+│  MIT / PV / 参数帧 / 反馈解析           │
 └─────────────────┬─────────────────────┘
                   │
                   ▼
@@ -122,79 +108,74 @@ SDK 采用严格五层架构。上位机应用仅需与最上面两层（门面�
 
 横切层（各层均可引用）：
   exceptions.py       — GloriaSdkError 异常体系
-  types.py            — Limits、ControlMode、PositionRange
-  actuator.py         — Actuator、ActuatorState
+  types.py            — Limits、ControlMode、PositionRange、ActuatorState
   registers.py        — Variable（RID 枚举）
-  gripper_baseline.py — TorqueBaseline
 ```
 
 ## 快速开始
 
 ```python
-from gloria_m_sdk import GloriaGripper, ControlMode
+from gloria_m_sdk import GloriaGripper
 
-with GloriaGripper("COM5") as g:  # 将 COM5 替换为实际串口号
-    g.motor.set_mode(ControlMode.POS_VEL)
-    g.motor.enable()
-    g.motor.refresh()
-    print(f"位置 = {g.state.position:.3f} rad")
-
-    # 移动到开仓位置
-    g.motion.send_pos_vel(position=2.5, velocity=1.0)
+with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
+    gripper.move_to(1000)
+    gripper.move_to(0)
 ```
 
-### GloriaGripper 构造参数
+完整夹取流程可以直接调用：
 
 ```python
-GloriaGripper(
-    port,                    # 如 "COM5" 或 "/dev/ttyUSB0"；可用 'auto' 自动检测
-    *,
-    baudrate=921_600,
-    command_id=0x01,         # 电机命令 CAN ID
-    feedback_id=0x101,       # 电机反馈 CAN ID
-    limits=None,             # Limits(pmax, vmax, tmax)，默认 (3.14, 10, 12)
-    safe_position=None,      # PositionRange(min, max) — 位置限幅
-    baseline_csv=None,       # 空载扭矩基线 CSV 路径
-    timeout=0.5,             # 串口读超时 [s]
-    _transport=None,         # 测试锆：传入 FakeCanAdapter 替代实际串口
-)
+from gloria_m_sdk import GloriaGripper
+
+with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
+    gripper.grip(return_to_initial=False)
 ```
 
-### GloriaGripper 属性
-
-| 属性 | 类型 | 说明 |
-|------|------|------|
-| `state` | `ActuatorState` | 最新反馈快照（位置、速度、扭矩） |
-| `current_mode` | `ControlMode \| None` | 电机最后确认的控制模式；`set_mode()` 前为 `None` |
-| `is_connected` | `bool` | `True` 表示串口已打开 |
-
-### GloriaGripper.motor — MotorAPI
+### GloriaGripper 方法
 
 | 方法 | 说明 |
 |------|------|
+| `from_config(path)` | 从 TOML 配置创建 API 对象 |
+| `move_to(value)` | 用户单位控制：`1000=打开`，`0=带保护闭合` |
+| `open()` | 用 MIT 位置控制打开夹爪 |
+| `close()` | 软闭合搜索；接触后不再追完全闭合位置 |
+| `hold(duration_s=None)` | 在接触位置保持 |
+| `release()` | 打开/释放夹爪 |
+| `grip(...)` | 便捷流程：可选打开、闭合、保持、可选释放 |
+| `check_connection()` | 只读串口/CAN 诊断 |
+| `scan_ids(ids)` | 只读扫描 CAN ID |
+| `connect(mode=..., enable=...)` | 打开传输，可选切模式和使能 |
+| `disconnect()` | 必要时失能并关闭传输 |
 | `enable()` | 发送使能命令 |
 | `disable()` | 发送失能命令 |
 | `set_zero()` | 将当前位置设为零点 |
 | `set_mode(mode)` | 切换控制模式；失败则抛出 `GloriaModeError` |
-| `refresh()` | 广播请求状态并更新 `gripper.state` |
-| `poll()` | 解析待处理 RX 包，更新执行器状态 |
+| `send_mit_for(...)` | 切到 MIT、使能、发送原始 MIT 帧，然后失能 |
+| `send_pv_for(...)` | 切到 PV、使能、发送原始 PV 帧，然后失能 |
+| `pv_open()` / `pv_close()` / `pv_hold_closed()` | 简单 PV 夹爪运动方法 |
 
-### GloriaGripper.motion — MotionAPI
+### MIT 夹爪防堵转控制
 
-| 方法 | 说明 |
-|------|------|
-| `send_mit(*, kp, kd, q, dq, tau)` | 发送 MIT 扭矩控制帧 |
-| `send_pos_vel(*, position, velocity)` | 发送 PV 位置+速度帧 |
+`GloriaGripper` 内部使用 `GripperController` 状态机。闭合时不会用大 `Kp` 追完全闭合位置，而是低速搜索；检测到接触后记录当前位置，并切换到小力保持。
 
-### GloriaGripper.params — ParamAPI
+```python
+from gloria_m_sdk import GloriaGripper
 
-| 方法 | 说明 |
-|------|------|
-| `read(rid, *, timeout_s)` | 读取寄存器；超时返回 `None` |
-| `write_f32(rid, value)` | 写入 float32 寄存器 |
-| `write_u32(rid, value)` | 写入 uint32 寄存器 |
-| `save()` | 将参数持久化到 Flash |
-| `apply_limits(limits)` | 写入 PMAX/VMAX/TMAX 并保存 |
+with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
+    status = gripper.close()
+    print(status.contact_detected, status.contact_position)
+```
+
+如果硬件后端能读取电流、温度或错误码，可以通过 `health_reader` 注入：
+
+```python
+from gloria_m_sdk import MotorHealth
+
+gripper = GloriaGripper.from_config(
+    "demos/gripper_control.toml",
+    health_reader=lambda: MotorHealth(current_a=2.1, temperature_c=42.0, error_code=0),
+)
+```
 
 ### 异常体系
 
@@ -206,25 +187,22 @@ GloriaSdkError               # 基类，一网打尽
 └── GloriaModeError           # 模式切换未确认
 ```
 
-### 底层访问（高级用户）
-
-`CanController` 和 `SerialCanAdapter` 仍然导出并在示例脚本中直接使用。
+### 底层访问
 
 | 符号 | 说明 |
 |------|------|
-| `CanController` | 直接命令下发 / 反馈解析 |
 | `SerialCanAdapter` | 原始串口转 CAN 传输 |
 | `ICanTransport` | 自定义传输层的结构型协议 |
 | `FakeCanAdapter` | 纯内存传输捆，无硬件可测试 |
 | `Variable` | 寄存器 ID 枚举（RID） |
-| `TorqueBaseline` | 空载扭矩基线，用于力估算 |
 
 ## 无硬件测试
 
-`FakeCanAdapter` 是 `SerialCanAdapter` 的纯内存替代品。通过 `_transport` 参数注入，无需连接任何硬件即可运行全量 SDK 逻辑：
+`FakeCanAdapter` 是 `SerialCanAdapter` 的纯内存替代品。测试套件把它注入内部电机客户端，无需连接任何硬件即可运行协议逻辑：
 
 ```python
-from gloria_m_sdk import FakeCanAdapter, GloriaGripper, ControlMode
+from gloria_m_sdk import FakeCanAdapter, ControlMode
+from gloria_m_sdk.client import MotorClient
 from gloria_m_sdk.registers import Variable
 
 fake = FakeCanAdapter()
@@ -232,12 +210,12 @@ fake = FakeCanAdapter()
 fake.queue_param_reply(can_id=0x101, rid=int(Variable.CTRL_MODE),
                        value=int(ControlMode.POS_VEL), is_u32=True)
 
-with GloriaGripper("任意端口", _transport=fake) as g:
-    g.motor.set_mode(ControlMode.POS_VEL)
+with MotorClient("任意端口", _transport=fake) as g:
+    g.set_mode(ControlMode.POS_VEL)
     assert g.current_mode == ControlMode.POS_VEL
 ```
 
-运行内置测试套件（60 项测试，约 1 秒，无需硬件）：
+运行内置测试套件（无需硬件）：
 
 ```bash
 pytest tests/ -v
@@ -262,112 +240,93 @@ logging.basicConfig(
 | `DEBUG` | 每一条 CAN 帧收发 |
 
 ## 示例
-### 01_gripper_quicktest.py - PV 模式往复运动测试
-夹爪会在打开位置和闭合位置之间反复运动，用于快速验证 PV 控制模式是否正常工作。
+
+所有 demo 默认读取 `demos/gripper_control.toml`。只有需要覆盖串口时才传 `--port`；如果配置里的 `connection.port` 是 `auto`，SDK 会自动选择最像 USB-CAN 的串口。
+
+### 00_check_connection.py - 检查配置、串口和 CAN
+
+使用 `GloriaGripper.check_connection()` 检查串口/CAN 通信。不使能电机、不切模式、不写参数、不保存 Flash、不运动夹爪。
 
 ```bash
-python demos/01_gripper_quicktest.py --port auto --id 0x01 --close-q 0.0 --open-q 2.5 --vel 1.0
+python demos/00_check_connection.py --list-ports
+python demos/00_check_connection.py
+python demos/00_check_connection.py --scan-ids 1-10
 ```
 
-### 02_pv_control.py - PV 模式柔顺闭合
+### 01_enable_disable.py - 使能 / 失能电机
 
-先打开到 2.5 rad，再以较低速度在 PV 模式下闭合到 0 rad。适合柔和夹取较脆弱的物体。
+使用 `GloriaGripper.enable_for()` 连接电机、可选切模式、短时间使能，并在退出时确保失能。这个 demo 不执行打开、闭合或夹取动作。
 
 ```bash
-python demos/02_pv_control.py --port auto --open-q 2.5 --close-q 0.0 --close-vel 0.3
+python demos/01_enable_disable.py
+python demos/01_enable_disable.py --duration-s 2.0 --mode mit
+python demos/01_enable_disable.py --action disable
 ```
 
-### 03_mit_linkage_force_control.py - MIT 连杆夹爪力控
+### 02_read_state.py - 读取当前位置和状态
 
-基于 MIT 扭矩控制实现“接近 - 接触 - 保持 - 释放”流程，并通过可配置的力臂曲线估算指尖夹持力。
-如果没有指定 baseline 文件则默认选择 close_baseline_4310.csv
+使用 `GloriaGripper.refresh()` 持续打印当前位置、速度、力矩，以及是否收到反馈。默认不使能电机。
 
 ```bash
-python demos/03_mit_linkage_force_control.py --port auto --open-q 2.77 --close-q 0.003 --target-force 15
+python demos/02_read_state.py
+python demos/02_read_state.py --single
+python demos/02_read_state.py --enable --single
+python demos/02_read_state.py --enable --samples 10
 ```
 
-使用 4340 强力版本夹爪
+### 03_set_zero.py - 将当前位置设置为零点
+
+使用 `GloriaGripper.set_zero()` 先打印当前位置，再等待按回车确认后发送置零命令。这个操作会永久改变电机角度零点。
 
 ```bash
-python demos/03_mit_linkage_force_control.py --port auto --baseline-csv ".\demos\baseline\close_baseline_4340.csv" --target-force 30 --contact-force 60
+python demos/03_set_zero.py
 ```
 
-**MIT 控制公式：**
+### 04_switch_mode.py - 切换控制模式
 
-$$\tau_{out} = k_p \cdot (q_{target} - q_{fb}) + k_d \cdot (dq_{target} - dq_{fb}) + \tau_{ff}$$
-
-### mit_close_baseline.py - MIT 空载闭合基线采集
-
-该脚本用于在 MIT 模式下以固定负扭矩让夹爪空载闭合，记录闭合过程中的位置、速度、反馈扭矩和估算夹持力。输出的基线文件可作为 `03_mit_linkage_force_control.py` 的 `--baseline-csv` 输入，用于扣除夹爪自身摩擦、机构阻力等空载负载。
-
-建议在没有夹持物的情况下运行：
+使用 `GloriaGripper.set_mode()` 在 MIT 和 PV 模式之间切换。不使能电机，也不发送运动命令。
 
 ```bash
-python demos/mit_close_baseline.py --port auto --close-tau -1.25
+python demos/04_switch_mode.py --mode mit
+python demos/04_switch_mode.py --mode pv
 ```
 
-常用参数：
+### 05_send_mit_frame.py - 发送 MIT 控制帧
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--port` | auto | 串口号 |
-| `--baud` | 921600 | 串口波特率 |
-| `--id` | 0x01 | 电机命令 CAN ID |
-| `--fb-id` | 0x201 | 电机反馈 CAN ID |
-| `--open-q` | 2.77 | 夹爪最大张开位置 [rad] |
-| `--close-q` | 0.003 | 夹爪闭合位置 [rad] |
-| `--close-tau` | -1.25 | 闭合方向扭矩 [N·m]，必须为负值 |
-| `--kd` | 0.8 | MIT 扭矩控制阻尼项 |
-| `--stop-force` | 0.0 | 估算夹持力达到该阈值后停止，0 表示禁用 [N] |
-| `--radius-mm` | 12.0 | 用于估算夹持力的等效力臂 [mm] |
-| `--timeout` | 5.0 | 最长采集时间 [s] |
-| `--position-epsilon` | 0.02 | 判定到达闭合位置的容差 [rad] |
-| `--bin-width` | 0.05 | 按位置生成基线曲线时的分桶宽度 [rad] |
-| `--save-dir` | demos/baseline | CSV 输出目录 |
-| `--save-prefix` | close_baseline | CSV 文件名前缀 |
-| `--no-save` | false | 只运行测试，不保存 CSV |
+使用 `GloriaGripper.send_mit_for()` 切到 MIT 模式、使能、发送原始 MIT 控制帧，然后失能。位置使用用户单位：`1000=打开`，`0=闭合`。
 
-运行完成后默认生成两个 CSV 文件：
-
-```text
-demos/baseline/{save_prefix}_{timestamp}_raw.csv
-demos/baseline/{save_prefix}_{timestamp}_binned.csv
+```bash
+python demos/05_send_mit_frame.py
+python demos/05_send_mit_frame.py --positions 1000,500,0,500,1000
 ```
 
-原始采样 CSV 每一行对应控制循环中的一次采样：
+### 06_send_pv_frame.py - 发送 PV 位置+速度帧
 
-| 字段 | 说明 |
-|------|------|
-| `elapsed_s` | 从本次测试开始到当前采样点的时间 [s] |
-| `position_rad` | 当前电机位置反馈 [rad] |
-| `velocity_rad_s` | 当前电机速度反馈 [rad/s] |
-| `tau_cmd_nm` | 当前发送的 MIT 扭矩命令 [N·m] |
-| `tau_fb_nm` | 电机反馈扭矩 [N·m] |
-| `force_est_n` | 根据反馈扭矩估算的夹持力 [N]，计算方式为 `max(0, -tau_fb_nm) / (radius_mm / 1000)` |
+使用 `GloriaGripper.send_pv_for()` 切到 PV 模式、使能、发送原始 PV 位置/速度帧，然后失能。位置使用用户单位：`1000=打开`，`0=闭合`。
 
-分桶基线 CSV 会把位置相近的原始采样点归为一组，并对每组求平均，适合后续作为基线曲线使用：
+```bash
+python demos/06_send_pv_frame.py
+python demos/06_send_pv_frame.py --positions 1000,500,0,500,1000 --velocity 0.6 --duration-s 5.0
+```
 
-| 字段 | 说明 |
-|------|------|
-| `position_mean_rad` | 当前位置分桶内的平均位置 [rad] |
-| `velocity_mean_rad_s` | 当前位置分桶内的平均速度 [rad/s] |
-| `tau_fb_mean_nm` | 当前位置分桶内的平均反馈扭矩 [N·m] |
-| `force_est_mean_n` | 当前位置分桶内的平均估算夹持力 [N] |
-| `sample_count` | 当前位置分桶内包含的原始采样点数量 |
+### 07_pv_gripper.py - PV 打开 / 闭合 / 保持
 
-## 常用参数
+使用 `GloriaGripper` 的 PV 方法打开、低速闭合，并在配置的闭合位置保持。需要接触检测和防堵转时，用 MIT API demo。
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--port` | auto | 串口号 |
-| `--baud` | 921600 | 串口波特率 |
-| `--id` | 0x01 | 电机命令 CAN ID |
-| `--fb-id` | 0x101 | 电机反馈 CAN ID |
-| `--open-q` | 2.5 | 打开位置 [rad] |
-| `--close-q` | 0.0 | 闭合位置 [rad] |
-| `--baseline-csv` | ".\\demos\\baseline\\close_baseline_4310.csv" | 云犀夹爪的基线负载文件，默认是4310的参数。4340版本需手动改用close_baseline_4340.csv |
-| `--target-force` | 15 | 目标夹持力 |
-| `--contact-force` | 10 | 接触检测力阈值，使用4340版本夹爪时需改为60 |
+```bash
+python demos/07_pv_gripper.py
+python demos/07_pv_gripper.py --close-vel 0.3 --hold-s 2.0
+```
+
+### 08_mit_gripper.py - MIT 夹爪用户示例
+
+展示推荐给用户的真实调用方式：先打开到 `1000`，再调用 `move_to(0, stall_protection=True)`。通过配置创建的 API 对象里，这一个闭合命令会自动持续保持，直到用户按 Ctrl+C 退出。
+
+```bash
+python demos/08_mit_gripper.py
+python demos/08_mit_gripper.py --force-level 4
+python demos/08_mit_gripper.py --port /dev/cu.usbmodem00000000050C1
+```
 
 ## 许可证
 

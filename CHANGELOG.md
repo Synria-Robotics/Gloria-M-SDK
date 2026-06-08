@@ -26,8 +26,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   logging.basicConfig(level=logging.INFO)
   ```
 - **Test suite** (`tests/`): pytest-based tests covering protocol bit-packing
-  round-trips (`test_protocol_mit.py`), baseline interpolation
-  (`test_baseline.py`), and full facade integration via `FakeCanAdapter`
+  round-trips and full facade integration via `FakeCanAdapter`
   (`test_client.py`).  All tests run without hardware.
 - `FakeCanAdapter` exported from top-level `gloria_m_sdk` package.
 - `ICanTransport` exported from top-level `gloria_m_sdk` package.
@@ -106,8 +105,6 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - MIT protocol bit-packing / unpacking (`protocol_mit.py`).
 - Serial-to-CAN framing (`serial_can_adapter.py`).
 - `CanController` with enable / disable / set_zero / PV / MIT commands.
-- `TorqueBaseline` CSV loader and piecewise-linear interpolator.
-- Demo scripts: `01_gripper_quicktest.py`, `02_pv_control.py`,
-  `03_mit_linkage_force_control.py`, `mit_close_baseline.py`.
+- Demo scripts: `01_gripper_quicktest.py`, `02_pv_control.py`.
 - Exception hierarchy: `GloriaSdkError`, `GloriaConnectionError`,
   `GloriaCommunicationError`, `GloriaConfigError`.
