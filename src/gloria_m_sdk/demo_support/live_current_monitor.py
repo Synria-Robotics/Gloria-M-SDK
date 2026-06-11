@@ -4,7 +4,10 @@ import math
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any, Deque, Optional, Tuple
+
+from .current_logger import CurrentLogWriter
 
 DEFAULT_KT_NM_PER_A = 1.0
 
@@ -27,11 +30,22 @@ def estimate_current_from_torque(
 class LiveCurrentMonitor:
     """Small Tk window used by demos to display live estimated current curve."""
 
-    def __init__(self, *, title: str, refresh_hz: float = 10.0) -> None:
+    def __init__(
+        self,
+        *,
+        title: str,
+        refresh_hz: float = 10.0,
+        demo_name: str = "current_monitor",
+        log_root: Optional[Path] = None,
+    ) -> None:
         self.stop_event = threading.Event()
         self._lock = threading.Lock()
         self._refresh_ms = max(50, int(1000.0 / max(1.0, float(refresh_hz))))
         self._title = title
+        self._log_writer = CurrentLogWriter(
+            demo_name=demo_name,
+            log_root=Path("log") if log_root is None else Path(log_root),
+        )
         self._root: Any = None
         self._canvas: Any = None
         self._header_var: Any = None
@@ -54,7 +68,9 @@ class LiveCurrentMonitor:
                 now = time.perf_counter()
                 if self._started_at is None:
                     self._started_at = now
-                self._history.append((now, float(current)))
+                sample = (now, float(current))
+                self._history.append(sample)
+                self._log_writer.append_sample(*sample)
                 self._trim_history(now)
 
     def set_status(self, status: str, *, message: Optional[str] = None) -> None:
@@ -114,6 +130,10 @@ class LiveCurrentMonitor:
         self._refresh()
         root.mainloop()
         self.stop_event.set()
+
+    def save_current_log(self) -> Optional[Path]:
+        with self._lock:
+            return self._log_writer.finalize()
 
     def _refresh(self) -> None:
         if self._root is None or self.stop_event.is_set():
