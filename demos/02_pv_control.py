@@ -31,7 +31,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 import time
+import traceback
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _SRC_DIR = os.path.join(_REPO_ROOT, "src")
@@ -43,7 +45,10 @@ from gloria_m_sdk import (
     GloriaGripper,
     Limits,
     PositionRange,
+    Variable,
 )
+
+from live_current_monitor import LiveCurrentMonitor, update_monitor_from_state
 
 # =============================================================================
 # ★ 用户参数区 — 直接在此修改即可，无需命令行参数
@@ -113,9 +118,34 @@ def main() -> int:
     ap.add_argument("--settle-time", type=float, default=SETTLE_TIME, help="dwell time after settling [s]")
     ap.add_argument("--timeout", type=float, default=TIMEOUT, help="max time per segment [s]")
     ap.add_argument("--hold-time", type=float, default=HOLD_TIME, help="grip hold duration after closing [s]")
+    ap.add_argument("--monitor-hz", type=float, default=10.0, help="current monitor refresh frequency [Hz]")
+    ap.add_argument("--kt-rid", type=_parse_int, default=int(Variable.KT_Value), help="KT_Value register RID")
+    ap.add_argument("--param-timeout", type=float, default=0.05, help="register read timeout [s]")
     args = ap.parse_args()
     args.port = _resolve_port(args.port)
 
+    monitor = LiveCurrentMonitor(title="Gloria-M PV Current", refresh_hz=args.monitor_hz)
+    result = {"code": 0}
+
+    def _worker() -> None:
+        try:
+            _run_demo(args, monitor)
+        except Exception as exc:
+            result["code"] = 1
+            monitor.set_status("Error", message=str(exc))
+            traceback.print_exc()
+
+    thread = threading.Thread(target=_worker, name="pv-control")
+    thread.start()
+    try:
+        monitor.run()
+    except KeyboardInterrupt:
+        monitor.close()
+    thread.join()
+    return int(result["code"])
+
+
+def _run_demo(args: argparse.Namespace, monitor: LiveCurrentMonitor) -> None:
     safe_q = PositionRange(min=min(args.open_q, args.close_q), max=max(args.open_q, args.close_q))
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
@@ -137,6 +167,14 @@ def main() -> int:
         # Read the initial position before issuing any move commands.
         g.motor.refresh()
         print(f"[init] position = {g.state.position:.3f} rad")
+        kt_value = g.params.read(int(args.kt_rid), timeout_s=float(args.param_timeout))
+        update_monitor_from_state(
+            monitor,
+            g.state,
+            kt_value=kt_value,
+            status="Running",
+            phase="init",
+        )
 
         try:
             # ---- Phase 1: open to open_q ----
@@ -144,7 +182,8 @@ def main() -> int:
             _move_to(g, target=args.open_q, velocity=args.open_vel,
                      loop_sleep=args.loop_sleep, print_hz=args.print_hz,
                      settle_threshold=args.settle_threshold, settle_time=args.settle_time,
-                     timeout=args.timeout)
+                     timeout=args.timeout, monitor=monitor, kt_value=kt_value,
+                     phase="opening")
             print(f"\n  Open complete, current position = {g.state.position:.3f} rad")
             time.sleep(0.5)
 
@@ -153,15 +192,26 @@ def main() -> int:
             _move_to(g, target=args.close_q, velocity=args.close_vel,
                      loop_sleep=args.loop_sleep, print_hz=args.print_hz,
                      settle_threshold=args.settle_threshold, settle_time=args.settle_time,
-                     timeout=args.timeout)
+                     timeout=args.timeout, monitor=monitor, kt_value=kt_value,
+                     phase="closing")
             print(f"\n  Close complete, current position = {g.state.position:.3f} rad")
 
             # Hold position: keep sending the closed position with velocity=0
             # so the motor holds stiffly rather than going limp.
-            print(f"  Holding grip for {args.hold_time:.1f} s ...")
+            print(f"  Holding grip for at least {args.hold_time:.1f} s ...")
             hold_end = time.perf_counter() + args.hold_time
-            while time.perf_counter() < hold_end:
+            while not monitor.should_stop():
                 g.motion.send_pos_vel(position=args.close_q, velocity=0.0, poll=True)
+                update_monitor_from_state(
+                    monitor,
+                    g.state,
+                    kt_value=kt_value,
+                    status="Running",
+                    phase="holding",
+                    message="Close the window to stop the demo.",
+                )
+                if time.perf_counter() >= hold_end:
+                    monitor.set_status("Holding", message="Motion complete. Close the window to exit.")
                 time.sleep(args.loop_sleep)
 
             print("  Done!")
@@ -172,8 +222,7 @@ def main() -> int:
             # Always de-energize the motor on exit.
             g.motor.disable()
             print("[disable] ok")
-
-    return 0
+            monitor.set_status("Stopped", message="Motor disabled. Close the window to exit.")
 
 
 def _move_to(
@@ -186,6 +235,9 @@ def _move_to(
     settle_threshold: float,
     settle_time: float,
     timeout: float,
+    monitor: LiveCurrentMonitor,
+    kt_value: float | None,
+    phase: str,
 ) -> None:
     """Block until the motor reaches *target* within *settle_threshold* [rad].
 
@@ -221,8 +273,15 @@ def _move_to(
     last_print_at = 0.0
     print_interval = 1.0 / max(1.0, print_hz)
 
-    while True:
+    while not monitor.should_stop():
         g.motion.send_pos_vel(position=target, velocity=velocity, poll=True)
+        update_monitor_from_state(
+            monitor,
+            g.state,
+            kt_value=kt_value,
+            status="Running",
+            phase=phase,
+        )
 
         now = time.perf_counter()
         elapsed = now - seg_start

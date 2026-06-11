@@ -44,7 +44,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 import time
+import traceback
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -63,6 +65,8 @@ from gloria_m_sdk import (
     TorqueBaseline,
     Variable,
 )
+
+from live_current_monitor import LiveCurrentMonitor, update_monitor_from_state
 
 # =============================================================================
 # ★ 用户参数区 — 直接在此修改即可，无需命令行参数
@@ -318,6 +322,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--hold-q", type=float, default=None, help="target position locked during the hold phase [rad]; defaults to close-q when position-only is set")
     ap.add_argument("--hold-kp", type=float, default=25.0, help="position hold stiffness kp; only active when --hold-q is set")
     ap.add_argument("--position-only", action="store_true", help="move to the specified close position and hold; defaults to close-q when --hold-q is not set")
+    ap.add_argument("--monitor-hz", type=float, default=10.0, help="current monitor refresh frequency [Hz]")
+    ap.add_argument("--kt-rid", type=_parse_int, default=int(Variable.KT_Value), help="KT_Value register RID")
+    ap.add_argument("--param-timeout", type=float, default=0.05, help="register read timeout [s]")
     return ap
 
 
@@ -325,6 +332,28 @@ def main() -> int:
     args = _build_arg_parser().parse_args()
     args.port = _resolve_port(args.port)
 
+    monitor = LiveCurrentMonitor(title="Gloria-M MIT Current", refresh_hz=args.monitor_hz)
+    result = {"code": 0}
+
+    def _worker() -> None:
+        try:
+            _run_demo(args, monitor)
+        except Exception as exc:
+            result["code"] = 1
+            monitor.set_status("Error", message=str(exc))
+            traceback.print_exc()
+
+    thread = threading.Thread(target=_worker, name="mit-control")
+    thread.start()
+    try:
+        monitor.run()
+    except KeyboardInterrupt:
+        monitor.close()
+    thread.join()
+    return int(result["code"])
+
+
+def _run_demo(args: argparse.Namespace, monitor: LiveCurrentMonitor) -> None:
     # Backwards compatibility for old default values.
     # Tests showed that -1.25 Nm is sufficient for stable closing;
     # if the user hasn't explicitly overridden the old defaults, silently upgrade to a more practical value.
@@ -396,6 +425,14 @@ def main() -> int:
             f"close_q={close_q:+.3f} | hold_q={hold_q_cmd if hold_q_cmd is not None else 'auto'} | "
             f"open_tau={open_tau:+.3f} | close_tau={close_tau:+.3f}"
         )
+        kt_value = ctrl.read_param(act, int(args.kt_rid), timeout_s=float(args.param_timeout))
+        update_monitor_from_state(
+            monitor,
+            act.state,
+            kt_value=kt_value,
+            status="Running",
+            phase="init",
+        )
 
         force_integral = 0.0
         cycles_done = 0
@@ -416,7 +453,7 @@ def main() -> int:
         last_print_at = 0.0
 
         try:
-            while True:
+            while not monitor.should_stop():
                 now = time.perf_counter()
                 dt = 0.0 if last_loop_mono is None else max(1e-4, now - last_loop_mono)
                 last_loop_mono = now
@@ -454,7 +491,11 @@ def main() -> int:
                     )
                     if (reached_open and phase_age >= 0.05) or opening_stuck:
                         if args.cycles > 0 and cycles_done >= args.cycles:
-                            break
+                            phase = "holding_done"
+                            phase_started_at = now
+                            phase_started_q = float(act.state.position)
+                            print("[done] requested cycles complete; holding until monitor window closes")
+                            continue
                         phase = "approaching"
                         phase_started_at = now
                         phase_started_q = float(act.state.position)
@@ -587,6 +628,12 @@ def main() -> int:
                         phase_started_q = float(act.state.position)
                         print(f"[cycle] {cycles_done} complete")
 
+                elif phase == "holding_done":
+                    tau_cmd = 0.0
+                    q_target = float(act.state.position)
+                    kp = float(args.hold_kp)
+                    kd = args.hold_kd
+
                 else:
                     raise RuntimeError(f"unknown phase: {phase}")
 
@@ -598,6 +645,14 @@ def main() -> int:
                     dq=0.0,
                     tau=float(tau_cmd),
                     poll=True,
+                )
+                update_monitor_from_state(
+                    monitor,
+                    act.state,
+                    kt_value=kt_value,
+                    status="Running" if phase != "holding_done" else "Holding",
+                    phase=phase,
+                    message="Close the window to stop the demo.",
                 )
 
                 print_period = 1.0 / max(1.0, float(args.print_hz))
@@ -626,8 +681,9 @@ def main() -> int:
             # Always de-energize the motor before closing the serial port.
             ctrl.disable(act)
             print("[disable] ok")
+            monitor.set_status("Stopped", message="Motor disabled. Close the window to exit.")
 
-    return 0
+    return None
 
 
 if __name__ == "__main__":

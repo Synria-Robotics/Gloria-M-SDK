@@ -28,7 +28,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 import time
+import traceback
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _SRC_DIR = os.path.join(_REPO_ROOT, "src")
@@ -40,7 +42,10 @@ from gloria_m_sdk import (
     GloriaGripper,
     Limits,
     PositionRange,
+    Variable,
 )
+
+from live_current_monitor import LiveCurrentMonitor, update_monitor_from_state
 
 
 def _parse_int(value: str) -> int:
@@ -77,9 +82,34 @@ def main() -> int:
     ap.add_argument("--settle-threshold", type=float, default=0.1, help="settle threshold [rad]")
     ap.add_argument("--settle-time", type=float, default=0.3, help="dwell time after settling [s]")
     ap.add_argument("--timeout", type=float, default=8.0, help="max time per segment [s]; auto-switch on timeout")
+    ap.add_argument("--monitor-hz", type=float, default=10.0, help="current monitor refresh frequency [Hz]")
+    ap.add_argument("--kt-rid", type=_parse_int, default=int(Variable.KT_Value), help="KT_Value register RID")
+    ap.add_argument("--param-timeout", type=float, default=0.05, help="register read timeout [s]")
     args = ap.parse_args()
     args.port = _resolve_port(args.port)
 
+    monitor = LiveCurrentMonitor(title="Gloria-M Quick Test Current", refresh_hz=args.monitor_hz)
+    result = {"code": 0}
+
+    def _worker() -> None:
+        try:
+            _run_demo(args, monitor)
+        except Exception as exc:
+            result["code"] = 1
+            monitor.set_status("Error", message=str(exc))
+            traceback.print_exc()
+
+    thread = threading.Thread(target=_worker, name="quicktest-control")
+    thread.start()
+    try:
+        monitor.run()
+    except KeyboardInterrupt:
+        monitor.close()
+    thread.join()
+    return int(result["code"])
+
+
+def _run_demo(args: argparse.Namespace, monitor: LiveCurrentMonitor) -> None:
     safe_q = PositionRange(min=min(args.open_q, args.close_q), max=max(args.open_q, args.close_q))
     limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
 
@@ -102,12 +132,20 @@ def main() -> int:
         # known state rather than from zero.
         g.motor.refresh()
         print(f"[init] position = {g.state.position:.3f} rad")
+        kt_value = g.params.read(int(args.kt_rid), timeout_s=float(args.param_timeout))
+        update_monitor_from_state(
+            monitor,
+            g.state,
+            kt_value=kt_value,
+            status="Running",
+            phase="init",
+        )
 
         cycle = 0
         last_print_at = 0.0
 
         try:
-            while True:
+            while not monitor.should_stop():
                 # Alternate between close and open targets each cycle.
                 if cycle % 2 == 0:
                     target = float(args.close_q)
@@ -120,10 +158,17 @@ def main() -> int:
                 seg_start = time.perf_counter()
                 settled_at = None
 
-                while True:
+                while not monitor.should_stop():
                     # Send PV command every loop iteration.  The motor
                     # firmware smooths the trajectory internally.
                     g.motion.send_pos_vel(position=target, velocity=args.vel, poll=True)
+                    update_monitor_from_state(
+                        monitor,
+                        g.state,
+                        kt_value=kt_value,
+                        status="Running",
+                        phase=direction,
+                    )
 
                     elapsed = time.perf_counter() - seg_start
                     pos_err = abs(g.state.position - target)
@@ -164,8 +209,7 @@ def main() -> int:
             # Always de-energize the motor on exit, even if an exception occurred.
             g.motor.disable()
             print("[disable] ok")
-
-    return 0
+            monitor.set_status("Stopped", message="Motor disabled. Close the window to exit.")
 
 
 if __name__ == "__main__":
