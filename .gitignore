@@ -23,6 +23,3 @@ build/
 dist/
 *.egg-info/
 
-# Demo runtime output
-log/
-
