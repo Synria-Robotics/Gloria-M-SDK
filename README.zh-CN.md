@@ -145,15 +145,20 @@ with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
 | `release()` | 打开/释放夹爪 |
 | `check_connection()` | 只读串口/CAN 诊断 |
 | `scan_ids(ids)` | 只读扫描 CAN ID |
-| `connect(mode=..., enable=...)` | 打开传输，可选切模式和使能 |
+| `connect(mode=..., enable=...)` | 打开传输，读取 PMAX 作为本次 MIT 量程，可选切模式和使能 |
 | `disconnect()` | 必要时失能并关闭传输 |
 | `enable()` | 发送使能命令 |
 | `disable()` | 发送失能命令 |
 | `set_zero()` | 将当前位置设为零点 |
 | `set_mode(mode)` | 切换控制模式；失败则抛出 `GloriaModeError` |
+| `sync_pmax_from_motor()` | 读取 PMAX 并仅更新当前 SDK 实例；不写电机 Flash |
 | `send_mit_for(...)` | 切到 MIT、使能、发送原始 MIT 帧，然后失能 |
 | `send_pv_for(...)` | 切到 PV、使能、发送原始 PV 帧，然后失能 |
 | `pv_open()` / `pv_close()` / `pv_hold_closed()` | 简单 PV 夹爪运动方法 |
+
+`GloriaGripper.connect()` 默认会在解析反馈或发送 MIT 命令前读取真机
+PMAX。真机未回复时保留配置中的 `[limits].pmax` 作为回退。该同步操作
+只读；使用 `apply_limits=True` 明确向电机写入配置量程时不会执行同步。
 
 ### MIT 夹爪防堵转控制
 

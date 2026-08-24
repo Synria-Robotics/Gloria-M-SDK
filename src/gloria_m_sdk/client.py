@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Optional
 
@@ -24,7 +25,7 @@ from .types import ActuatorState, ControlMode, Limits, PositionRange
 _log = logging.getLogger(__name__)
 
 _BROADCAST_ID = 0x7FF
-_DEFAULT_LIMITS = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
+_DEFAULT_LIMITS = Limits(pmax=12.5, vmax=10.0, tmax=12.0)
 
 
 class MotorClient:
@@ -119,6 +120,12 @@ class MotorClient:
     @property
     def state(self) -> ActuatorState:
         return self._state
+
+    @property
+    def limits(self) -> Limits:
+        """Return the MIT scaling limits used by this client instance."""
+
+        return self._limits
 
     @property
     def current_mode(self) -> Optional[ControlMode]:
@@ -254,6 +261,14 @@ class MotorClient:
         self.write_param_f32(Variable.VMAX, limits.vmax)
         self.write_param_f32(Variable.TMAX, limits.tmax)
         self.save_params()
+
+    def set_runtime_limits(self, limits: Limits) -> None:
+        """Update local MIT packing/unpacking limits without writing the motor."""
+
+        values = (limits.pmax, limits.vmax, limits.tmax)
+        if any(not math.isfinite(value) or value <= 0.0 for value in values):
+            raise ValueError("MIT runtime limits must be finite positive values")
+        self._limits = limits
 
     # ------------------------------------------------------------------
     # Internals

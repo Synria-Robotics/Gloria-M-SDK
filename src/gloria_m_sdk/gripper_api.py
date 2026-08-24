@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+import math
 import os
 from pathlib import Path
 import time
@@ -216,9 +217,13 @@ class GloriaGripper:
         mode: Optional[ControlMode] = ControlMode.MIT,
         enable: bool = True,
         apply_limits: bool = False,
+        sync_pmax: bool = True,
+        param_timeout_s: float = 0.2,
         refresh: bool = True,
     ) -> GripperControlStatus:
         self.motor.connect(apply_limits=apply_limits)
+        if sync_pmax and not apply_limits:
+            self.sync_pmax_from_motor(timeout_s=param_timeout_s)
         if mode is not None:
             self.motor.set_mode(mode)
         if enable:
@@ -333,6 +338,28 @@ class GloriaGripper:
 
         return self.motor.read_param(_parse_param_ref(param), timeout_s=timeout_s)
 
+    def sync_pmax_from_motor(self, *, timeout_s: float = 0.2) -> float:
+        """Use the motor's PMAX for local MIT packing/unpacking.
+
+        This is a read-only operation. It updates only the current SDK instance
+        and never writes motor parameters or saves Flash. If PMAX cannot be read
+        or is invalid, the configured runtime limit is retained.
+        """
+
+        configured = self.motor.limits
+        value = self.motor.read_param(Variable.PMAX, timeout_s=timeout_s)
+        try:
+            pmax = float(value) if value is not None else configured.pmax
+        except (TypeError, ValueError):
+            pmax = configured.pmax
+        if not math.isfinite(pmax) or pmax <= 0.0:
+            pmax = configured.pmax
+        if pmax != configured.pmax:
+            self.motor.set_runtime_limits(
+                Limits(pmax=pmax, vmax=configured.vmax, tmax=configured.tmax)
+            )
+        return pmax
+
     def read_params(
         self,
         params: Iterable[int | str | Variable],
@@ -353,8 +380,15 @@ class GloriaGripper:
         *,
         mode: Optional[ControlMode] = ControlMode.MIT,
         neutral_mit: bool = True,
+        sync_pmax: bool = True,
     ) -> MotorSnapshot:
-        self.connect(mode=mode, enable=False, apply_limits=False, refresh=False)
+        self.connect(
+            mode=mode,
+            enable=False,
+            apply_limits=False,
+            sync_pmax=sync_pmax,
+            refresh=False,
+        )
         try:
             snapshot = self.enable()
             end_at = time.monotonic() + duration_s
@@ -403,8 +437,15 @@ class GloriaGripper:
         dq: float = 0.0,
         tau: float = 0.0,
         period_s: float = 0.01,
+        sync_pmax: bool = True,
     ) -> MotorSnapshot:
-        self.connect(mode=ControlMode.MIT, enable=True, apply_limits=False, refresh=False)
+        self.connect(
+            mode=ControlMode.MIT,
+            enable=True,
+            apply_limits=False,
+            sync_pmax=sync_pmax,
+            refresh=False,
+        )
         try:
             snapshot = self.send_mit_frame(kp=kp, kd=kd, q=q, dq=dq, tau=tau)
             end_at = time.monotonic() + duration_s
@@ -434,8 +475,15 @@ class GloriaGripper:
         position: float,
         velocity: float,
         period_s: float = 0.01,
+        sync_pmax: bool = True,
     ) -> MotorSnapshot:
-        self.connect(mode=ControlMode.POS_VEL, enable=True, apply_limits=False, refresh=False)
+        self.connect(
+            mode=ControlMode.POS_VEL,
+            enable=True,
+            apply_limits=False,
+            sync_pmax=sync_pmax,
+            refresh=False,
+        )
         try:
             snapshot = self.send_pv_frame(position=position, velocity=velocity)
             end_at = time.monotonic() + duration_s
@@ -765,7 +813,7 @@ def _param_label(rid: int) -> str:
 def _build_limits(data: dict[str, Any]) -> Limits:
     limits = data.get("limits", {})
     return Limits(
-        pmax=float(limits.get("pmax", 3.14)),
+        pmax=float(limits.get("pmax", 12.5)),
         vmax=float(limits.get("vmax", 10.0)),
         tmax=float(limits.get("tmax", 12.0)),
     )

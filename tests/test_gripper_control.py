@@ -34,8 +34,8 @@ def _setup_mit_gripper(fake: FakeCanAdapter) -> MotorClient:
 
 
 def test_close_search_uses_incremental_target_not_close_limit(fake: FakeCanAdapter) -> None:
-    limits = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
     g = _setup_mit_gripper(fake)
+    limits = g.limits
     fake.queue_mit_feedback(can_id=0x101, position=2.45, velocity=-0.2, torque=0.05)
     g.refresh()
     fake.clear()

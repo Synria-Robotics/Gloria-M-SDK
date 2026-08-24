@@ -148,15 +148,22 @@ with GloriaGripper.from_config("demos/gripper_control.toml") as gripper:
 | `release()` | Open/release the gripper |
 | `check_connection()` | Read-only serial/CAN diagnostic |
 | `scan_ids(ids)` | Read-only CAN ID scan |
-| `connect(mode=..., enable=...)` | Open transport, optionally switch mode and enable |
+| `connect(mode=..., enable=...)` | Open transport, read PMAX for runtime MIT scaling, optionally switch mode and enable |
 | `disconnect()` | Disable if needed and close transport |
 | `enable()` | Send enable command |
 | `disable()` | Send disable command |
 | `set_zero()` | Set current position as zero |
 | `set_mode(mode)` | Switch control mode; raises `GloriaModeError` on failure |
+| `sync_pmax_from_motor()` | Read PMAX and update only this SDK instance; never writes motor Flash |
 | `send_mit_for(...)` | Switch to MIT, enable, send raw MIT frames, then disable |
 | `send_pv_for(...)` | Switch to PV, enable, send raw PV frames, then disable |
 | `pv_open()` / `pv_close()` / `pv_hold_closed()` | Simple PV gripper motion helpers |
+
+By default, `GloriaGripper.connect()` reads the motor's PMAX before decoding
+feedback or sending MIT commands. If the motor does not reply, the configured
+`[limits].pmax` value is retained as a fallback. This synchronization is
+read-only and is skipped when `apply_limits=True` because that mode explicitly
+writes the configured limits to the motor.
 
 ### MIT Gripper Stall Protection
 

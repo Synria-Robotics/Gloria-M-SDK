@@ -8,7 +8,7 @@ feedback_id = "0x101"
 timeout = 0.5
 
 [limits]
-pmax = 3.14
+pmax = 12.5
 vmax = 10.0
 tmax = 12.0
 

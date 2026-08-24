@@ -8,11 +8,13 @@ from gloria_m_sdk import (
     GripperControlState,
     GripperController,
     GripperLoopConfig,
+    Limits,
     PvMoveConfig,
     load_gripper_config,
     resolve_gripper_port,
 )
 from gloria_m_sdk.client import MotorClient
+from gloria_m_sdk.protocol import uint_to_float
 from gloria_m_sdk.registers import Variable
 
 
@@ -21,6 +23,7 @@ def test_load_gripper_config_reads_single_toml() -> None:
 
     assert cfg.connection.command_id == 0x01
     assert cfg.connection.feedback_id == 0x101
+    assert cfg.limits.pmax == 12.5
     assert cfg.control.open_pos > cfg.control.close_limit
 
 
@@ -53,7 +56,7 @@ def test_mit_gripper_api_close_hides_state_machine(fake: FakeCanAdapter) -> None
         is_u32=True,
     )
     fake.queue_mit_feedback(can_id=0x101, position=1.3, velocity=0.0, torque=-0.6)
-    api.connect(apply_limits=False)
+    api.connect(apply_limits=False, sync_pmax=False)
 
     fake.clear()
     fake.queue_mit_feedback(can_id=0x101, position=1.25, velocity=0.0, torque=-0.8)
@@ -91,7 +94,7 @@ def test_mit_gripper_api_move_to_uses_user_units_and_stall_protection(fake: Fake
         is_u32=True,
     )
     fake.queue_mit_feedback(can_id=0x101, position=2.0, velocity=0.0, torque=0.0)
-    api.connect(apply_limits=False)
+    api.connect(apply_limits=False, sync_pmax=False)
 
     fake.clear()
     fake.queue_mit_feedback(can_id=0x101, position=1.0, velocity=0.0, torque=0.0)
@@ -137,7 +140,7 @@ def test_pv_gripper_api_move_to_hides_mode_and_loop(fake: FakeCanAdapter) -> Non
         is_u32=True,
     )
     fake.queue_mit_feedback(can_id=0x101, position=2.7, velocity=0.0, torque=0.0)
-    api.connect(mode=ControlMode.POS_VEL, apply_limits=False)
+    api.connect(mode=ControlMode.POS_VEL, apply_limits=False, sync_pmax=False)
 
     fake.clear()
     fake.queue_mit_feedback(can_id=0x101, position=0.0, velocity=0.0, torque=0.0)
@@ -166,7 +169,7 @@ def test_motor_lifecycle_api_enable_for_disables_afterward(fake: FakeCanAdapter)
         is_u32=True,
     )
 
-    api.enable_for(0.0, mode=ControlMode.MIT)
+    api.enable_for(0.0, mode=ControlMode.MIT, sync_pmax=False)
 
     assert any(data[7] == 0xFC for _, data in fake.sent_frames)
     assert any(data[7] == 0xFD for _, data in fake.sent_frames)
@@ -175,7 +178,7 @@ def test_motor_lifecycle_api_enable_for_disables_afterward(fake: FakeCanAdapter)
 def test_motor_lifecycle_api_set_zero_sends_zero_command(fake: FakeCanAdapter) -> None:
     motor = MotorClient("unused", _transport=fake)
     api = GloriaGripper(motor, GripperController(motor, GripperControlConfig(open_pos=2.7, close_limit=0.0)))
-    api.connect(mode=None, enable=False, apply_limits=False, refresh=False)
+    api.connect(mode=None, enable=False, apply_limits=False, sync_pmax=False, refresh=False)
 
     api.set_zero()
 
@@ -185,7 +188,7 @@ def test_motor_lifecycle_api_set_zero_sends_zero_command(fake: FakeCanAdapter) -
 def test_gloria_gripper_read_param_accepts_register_name(fake: FakeCanAdapter) -> None:
     motor = MotorClient("unused", _transport=fake)
     api = GloriaGripper(motor, GripperController(motor, GripperControlConfig(open_pos=2.7, close_limit=0.0)))
-    api.connect(mode=None, enable=False, apply_limits=False, refresh=False)
+    api.connect(mode=None, enable=False, apply_limits=False, sync_pmax=False, refresh=False)
     fake.queue_param_reply(can_id=0x101, rid=int(Variable.PMAX), value=3.14, is_u32=False)
 
     value = api.read_param("PMAX", timeout_s=0.1)
@@ -194,10 +197,54 @@ def test_gloria_gripper_read_param_accepts_register_name(fake: FakeCanAdapter) -
     assert abs(float(value) - 3.14) < 0.001
 
 
+def test_connect_syncs_motor_pmax_for_feedback_decoding(fake: FakeCanAdapter) -> None:
+    configured = Limits(pmax=3.14, vmax=10.0, tmax=12.0)
+    motor = MotorClient("unused", limits=configured, _transport=fake)
+    api = GloriaGripper(
+        motor,
+        GripperController(motor, GripperControlConfig(open_pos=2.7, close_limit=0.0)),
+    )
+    actual = Limits(pmax=12.5, vmax=10.0, tmax=12.0)
+    fake.queue_param_reply(
+        can_id=0x101,
+        rid=int(Variable.PMAX),
+        value=actual.pmax,
+        is_u32=False,
+    )
+
+    api.connect(mode=None, enable=False, apply_limits=False, refresh=False)
+
+    assert motor.limits == actual
+    fake.queue_mit_feedback(
+        can_id=0x101,
+        position=1.35,
+        velocity=0.0,
+        torque=0.0,
+        limits=actual,
+    )
+    snapshot = api.refresh()
+    assert abs(snapshot.position - 1.35) < 0.001
+    assert abs(api.position_value(snapshot.position) - 500.0) < 0.1
+
+    fake.queue_param_reply(
+        can_id=0x101,
+        rid=int(Variable.CTRL_MODE),
+        value=int(ControlMode.MIT),
+        is_u32=True,
+    )
+    api.set_mode(ControlMode.MIT)
+    fake.clear()
+    motor.send_mit(kp=16.0, kd=1.8, q=1.35, dq=0.0, tau=0.0, poll=False)
+    _, command = fake.last_sent()
+    q_uint = (command[0] << 8) | command[1]
+    decoded_target = uint_to_float(q_uint, -actual.pmax, actual.pmax, 16)
+    assert abs(decoded_target - 1.35) < 0.001
+
+
 def test_motor_lifecycle_api_set_mode_updates_current_mode(fake: FakeCanAdapter) -> None:
     motor = MotorClient("unused", _transport=fake)
     api = GloriaGripper(motor, GripperController(motor, GripperControlConfig(open_pos=2.7, close_limit=0.0)))
-    api.connect(mode=None, enable=False, apply_limits=False, refresh=False)
+    api.connect(mode=None, enable=False, apply_limits=False, sync_pmax=False, refresh=False)
     fake.queue_param_reply(
         can_id=0x101,
         rid=int(Variable.CTRL_MODE),
@@ -221,7 +268,15 @@ def test_motor_lifecycle_api_send_mit_for_sends_frame_and_disables(fake: FakeCan
         is_u32=True,
     )
 
-    api.send_mit_for(0.0, kp=0.0, kd=0.8, q=None, dq=0.0, tau=0.0)
+    api.send_mit_for(
+        0.0,
+        kp=0.0,
+        kd=0.8,
+        q=None,
+        dq=0.0,
+        tau=0.0,
+        sync_pmax=False,
+    )
 
     assert any(data[7] == 0xFC for _, data in fake.sent_frames)
     assert any(can_id == 0x01 and data[7] not in (0xFC, 0xFD, 0xFE) for can_id, data in fake.sent_frames)
@@ -238,7 +293,7 @@ def test_motor_lifecycle_api_send_pv_for_sends_frame_and_disables(fake: FakeCanA
         is_u32=True,
     )
 
-    api.send_pv_for(0.0, position=2.0, velocity=0.5)
+    api.send_pv_for(0.0, position=2.0, velocity=0.5, sync_pmax=False)
 
     assert any(data[7] == 0xFC for _, data in fake.sent_frames)
     assert any(can_id == 0x101 for can_id, _ in fake.sent_frames)

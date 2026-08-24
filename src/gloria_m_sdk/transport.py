@@ -199,12 +199,12 @@ class FakeCanAdapter:
         torque:
             Simulated motor torque [N·m].
         limits:
-            MIT scaling limits; defaults to ``Limits(3.14, 10.0, 12.0)``.
+            MIT scaling limits; defaults to ``Limits(12.5, 10.0, 12.0)``.
         """
         from .types import Limits as _Limits
         from .protocol import float_to_uint
 
-        lim = limits if limits is not None else _Limits(pmax=3.14, vmax=10.0, tmax=12.0)
+        lim = limits if limits is not None else _Limits(pmax=12.5, vmax=10.0, tmax=12.0)
 
         q_uint = float_to_uint(position, -lim.pmax, lim.pmax, 16)
         dq_uint = float_to_uint(velocity, -lim.vmax, lim.vmax, 12)

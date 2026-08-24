@@ -5,6 +5,15 @@ All notable changes to the Gloria-M SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `GloriaGripper.connect()` now reads the motor's PMAX and uses it for the
+  current instance's MIT command/feedback scaling without writing motor Flash.
+- The Gloria-M fallback PMAX and bundled gripper configuration now use `12.5`
+  instead of the incompatible `3.14` value.
+
 ---
 
 ## [1.0.3] — 2026-05-09
